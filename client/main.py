@@ -369,8 +369,6 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                             remote.update_from_state(message.get("state", {}))
                             camera_world_x = mario.rect.x - (10 * 32)
                             screen_x = remote.rect.x - camera_world_x
-                            if 0 <= screen_x <= windowSize[0]:
-                                print(f"[client] remote player {username_msg} entered view at world_x={remote.rect.x}, screen_x={screen_x}")
                     elif msg_type == "hp_update":
                         mario.hp = message.get("hp", mario.hp)
                     elif msg_type == "player_hit":

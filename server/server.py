@@ -203,11 +203,16 @@ class GameServer:
                 should_delete = False
             client.room_id = None
         if room and not should_delete:
+            logging.info("%s left room %s, declaring opponent winner", client.username, room.room_id)
+            winner_name = None
             for member in room.members.values():
-                await self.send(member, {
-                    "type": "room_peer_left",
-                    "username": client.username,
-                })
+                if member.username != client.username:
+                    winner_name = member.username
+                    break
+            if not winner_name and room.members:
+                winner_name = next(iter(room.members.values())).username
+            if winner_name:
+                await self._broadcast_game_over(room, winner_name, client.username)
         if room and should_delete:
             async with self.lock:
                 self.rooms.pop(room.room_id, None)
