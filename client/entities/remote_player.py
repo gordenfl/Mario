@@ -26,12 +26,12 @@ class RemotePlayer:
         self.rect.y = int(position[1])
         self.visible = True
 
-    def draw(self, surface: pygame.Surface, camera_offset_x: float, camera_offset_y: float):
+    def draw(self, surface: pygame.Surface, camera_world_x: float, camera_world_y: float):
         if not self.visible:
             return
         draw_rect = self.rect.copy()
-        draw_rect.x -= int(camera_offset_x)
-        draw_rect.y -= int(camera_offset_y)
+        draw_rect.x -= int(camera_world_x)
+        draw_rect.y -= int(camera_world_y)
         pygame.draw.rect(surface, self.color, draw_rect)
         font = get_font(18)
         label = font.render(self.username, True, (255, 255, 255))

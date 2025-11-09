@@ -296,6 +296,8 @@ def build_remote_players(room_msg: dict, local_username: str, level: Level) -> d
             spawn_x, spawn_y = compute_spawn_position(spawn, level)
             rp.rect.x = spawn_x
             rp.rect.y = spawn_y
+            rp.state["position"] = [spawn_x, spawn_y]
+            rp.visible = True
             remote[username] = rp
     return remote
 
@@ -365,6 +367,10 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                                 remote = RemotePlayer(username_msg)
                                 remote_players[username_msg] = remote
                             remote.update_from_state(message.get("state", {}))
+                            camera_world_x = mario.rect.x - (10 * 32)
+                            screen_x = remote.rect.x - camera_world_x
+                            if 0 <= screen_x <= windowSize[0]:
+                                print(f"[client] remote player {username_msg} entered view at world_x={remote.rect.x}, screen_x={screen_x}")
                     elif msg_type == "hp_update":
                         mario.hp = message.get("hp", mario.hp)
                     elif msg_type == "player_hit":
@@ -373,8 +379,12 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                         game_over_info = message
                         break
 
+                raw_camera_x = mario.rect.x - (10 * 32)
+                max_camera_world_x = max(level.levelLength * 32 - windowSize[0], 0)
+                camera_world_x = max(0, min(raw_camera_x, max_camera_world_x))
+                camera_world_y = 0
                 for remote in remote_players.values():
-                    remote.draw(screen, mario.camera.x, mario.camera.y)
+                    remote.draw(screen, camera_world_x, camera_world_y)
 
                 network.send_state(collect_local_state(mario, dashboard))
                 if not fall_reported and mario.rect.bottom > fall_threshold:
