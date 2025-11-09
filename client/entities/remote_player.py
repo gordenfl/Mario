@@ -85,4 +85,5 @@ class RemotePlayer:
         surface.blit(image, draw_rect)
         font = get_font(18)
         label = font.render(self.username, True, (255, 255, 255))
-        surface.blit(label, (draw_rect.x, draw_rect.y - 16))
+        label_rect = label.get_rect(midbottom=(draw_rect.centerx, draw_rect.y - 2))
+        surface.blit(label, label_rect)
