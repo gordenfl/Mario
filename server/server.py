@@ -1,12 +1,30 @@
 import asyncio
 import json
 import logging
+import os
 import uuid
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 import random
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+
+
+def _load_level_length(default_tiles: int = 60) -> int:
+    level_path = os.path.join(os.path.dirname(__file__), "..", "client", "levels", "Level1-1.json")
+    try:
+        with open(level_path, "r", encoding="utf-8") as fp:
+            data = json.load(fp)
+            length = int(data.get("length", default_tiles))
+            if length > 0:
+                return length
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        logging.warning("Failed to load level length from %s: %s", level_path, exc)
+    return default_tiles
+
+
+LEVEL_TILE_LENGTH = _load_level_length()
+LEVEL_WIDTH_PIXELS = LEVEL_TILE_LENGTH * 32
 
 
 @dataclass
@@ -313,6 +331,7 @@ class GameServer:
             "drop_id": drop_id,
             "collector": client.username,
         }
+        logging.info("[room %s] drop %s collected by %s", client.room_id, drop_id[:6], client.username)
         for member in recipients:
             await self.send(member, payload)
 
@@ -342,6 +361,13 @@ class GameServer:
             "drop_id": drop_id,
             "direction": drop["direction"],
         }
+        logging.info(
+            "[room %s] drop %s collision from %s -> dir=%s",
+            client.room_id,
+            drop_id[:6],
+            side,
+            drop["direction"],
+        )
         for member in recipients:
             await self.send(member, payload)
 
@@ -353,7 +379,7 @@ class GameServer:
                     room = self.rooms.get(room_id)
                     if not room or room.is_empty():
                         break
-                    level_width = 32 * 200
+                    level_width = LEVEL_WIDTH_PIXELS
                     drop_type = random.choice(["coin", "mushroom"])
                     spawn_x = random.uniform(48, max(96, level_width - 48))
                     direction = random.choice([-1, 1])
@@ -363,6 +389,14 @@ class GameServer:
                         "x": spawn_x,
                         "direction": direction,
                     }
+                    logging.info(
+                        "[room %s] spawn_drop id=%s type=%s x=%.2f dir=%s",
+                        room_id,
+                        drop_id[:6],
+                        drop_type,
+                        spawn_x,
+                        direction,
+                    )
                     payload = {
                         "type": "spawn_drop",
                         "drop_id": drop_id,
