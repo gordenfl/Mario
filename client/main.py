@@ -377,8 +377,6 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     remote.draw(screen, mario.camera.x, mario.camera.y)
 
                 network.send_state(collect_local_state(mario, dashboard))
-
-                print(f"[client] {username} fell off the map, reporting to server, {fall_reported}, {mario.rect.bottom}, {fall_threshold}")
                 if not fall_reported and mario.rect.bottom > fall_threshold:
                     fall_reported = True
                     print(f"[client] {username} fell off the map, reporting to server")
@@ -450,13 +448,21 @@ def main():
         elif current_scene.next_scene == "lobby":
             username = current_scene.payload["username"]
             current_scene = LobbyScene(screen, network, username)
+            network.request_room_list()
         elif current_scene.next_scene == "game":
             payload = current_scene.payload
             run_game(screen, network, payload["username"], payload["room_ready"])
             network.close()
             # 回到大厅，保持登录会话
             network = NetworkClient()
+            try:
+                network.connect(payload["username"])
+            except (NetworkError, OSError) as exc:
+                print(f"[client] 重新连接服务器失败: {exc}")
+                current_scene = LoginScene(screen, network)
+                continue
             current_scene = LobbyScene(screen, network, payload["username"])
+            network.request_room_list()
 
 
 if __name__ == "__main__":
