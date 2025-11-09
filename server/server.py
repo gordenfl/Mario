@@ -4,6 +4,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import Dict, Optional
+import random
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
@@ -29,6 +30,7 @@ class ClientSession:
 class Room:
     room_id: str
     members: Dict[str, ClientSession] = field(default_factory=dict)
+    active_drops: Dict[str, Dict] = field(default_factory=dict)
 
     def is_full(self) -> bool:
         return len(self.members) >= 2
@@ -56,6 +58,7 @@ class GameServer:
         self.clients: Dict[str, ClientSession] = {}
         self.rooms: Dict[str, Room] = {}
         self.lock = asyncio.Lock()
+        self.room_drop_tasks: Dict[str, asyncio.Task] = {}
 
     async def start(self):
         server = await asyncio.start_server(self.handle_client, self.host, self.port)
@@ -104,6 +107,10 @@ class GameServer:
             await self.handle_player_hit(client, message)
         elif msg_type == "player_fall":
             await self.handle_player_fall(client, message)
+        elif msg_type == "drop_collected":
+            await self.handle_drop_collected(client, message)
+        elif msg_type == "drop_collision":
+            await self.handle_drop_collision(client, message)
         else:
             await self.send_error(client, "unknown_type", f"Unknown message type: {msg_type}")
 
@@ -142,6 +149,9 @@ class GameServer:
             self.rooms[room_id] = room
         logging.info("Room %s created by %s", room_id, client.username)
         await self.send(client, {"type": "room_created", "room_id": room_id})
+        async with self.lock:
+            if room_id not in self.room_drop_tasks:
+                self.room_drop_tasks[room_id] = asyncio.create_task(self._room_drop_loop(room_id))
 
     async def handle_join_room(self, client: ClientSession, message: Dict):
         room_id = message.get("room_id")
@@ -202,6 +212,10 @@ class GameServer:
             else:
                 should_delete = False
             client.room_id = None
+        if room and room.room_id in self.room_drop_tasks and room.is_empty():
+            task = self.room_drop_tasks.pop(room.room_id)
+            task.cancel()
+            room.active_drops.clear()
         if room and not should_delete:
             logging.info("%s left room %s, declaring opponent winner", client.username, room.room_id)
             winner_name = None
@@ -216,6 +230,9 @@ class GameServer:
         if room and should_delete:
             async with self.lock:
                 self.rooms.pop(room.room_id, None)
+                task = self.room_drop_tasks.pop(room.room_id, None)
+                if task:
+                    task.cancel()
         logging.info("%s left room %s", client.username, room.room_id if room else "<unknown>")
 
     async def handle_state_update(self, client: ClientSession, message: Dict):
@@ -278,6 +295,93 @@ class GameServer:
                 winner_name = client.username if client.username != loser_name else loser_name
         await self._broadcast_game_over(room, winner_name, loser_name)
         logging.info("Room %s game over: winner=%s loser=%s", room.room_id, winner_name, loser_name)
+
+    async def handle_drop_collected(self, client: ClientSession, message: Dict):
+        drop_id = message.get("drop_id")
+        if not drop_id or not client.room_id:
+            return
+        async with self.lock:
+            room = self.rooms.get(client.room_id)
+            if not room:
+                return
+            if drop_id not in room.active_drops:
+                return
+            room.active_drops.pop(drop_id, None)
+            recipients = list(room.members.values())
+        payload = {
+            "type": "drop_collected",
+            "drop_id": drop_id,
+            "collector": client.username,
+        }
+        for member in recipients:
+            await self.send(member, payload)
+
+    async def handle_drop_collision(self, client: ClientSession, message: Dict):
+        drop_id = message.get("drop_id")
+        side = message.get("side")
+        if not drop_id or not client.room_id:
+            return
+        async with self.lock:
+            room = self.rooms.get(client.room_id)
+            if not room:
+                return
+            drop = room.active_drops.get(drop_id)
+            if not drop or drop.get("type") != "mushroom":
+                return
+            current_dir = drop.get("direction", 1)
+            if side == "left":
+                new_direction = 1
+            elif side == "right":
+                new_direction = -1
+            else:
+                new_direction = -current_dir if current_dir else 1
+            drop["direction"] = new_direction or 1
+            recipients = list(room.members.values())
+        payload = {
+            "type": "drop_direction",
+            "drop_id": drop_id,
+            "direction": drop["direction"],
+        }
+        for member in recipients:
+            await self.send(member, payload)
+
+    async def _room_drop_loop(self, room_id: str):
+        try:
+            while True:
+                await asyncio.sleep(random.uniform(3.0, 6.0))
+                async with self.lock:
+                    room = self.rooms.get(room_id)
+                    if not room or room.is_empty():
+                        break
+                    level_width = 32 * 200
+                    drop_type = random.choice(["coin", "mushroom"])
+                    spawn_x = random.uniform(48, max(96, level_width - 48))
+                    direction = random.choice([-1, 1])
+                    drop_id = uuid.uuid4().hex
+                    room.active_drops[drop_id] = {
+                        "type": drop_type,
+                        "x": spawn_x,
+                        "direction": direction,
+                    }
+                    payload = {
+                        "type": "spawn_drop",
+                        "drop_id": drop_id,
+                        "owner": "server",
+                        "drop_type": drop_type,
+                        "x": spawn_x,
+                        "direction": direction,
+                    }
+                    recipients = list(room.members.values())
+                for member in recipients:
+                    await self.send(member, payload)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            async with self.lock:
+                self.room_drop_tasks.pop(room_id, None)
+                room = self.rooms.get(room_id)
+                if room:
+                    room.active_drops.clear()
 
     async def _broadcast_game_over(self, room: Room, winner: str, loser: str):
         payload = {

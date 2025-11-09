@@ -117,6 +117,21 @@ class NetworkClient:
         }
         self.send_message(payload)
 
+    def send_drop_collected(self, drop_id: str):
+        payload = {
+            "type": "drop_collected",
+            "drop_id": drop_id,
+        }
+        self.send_message(payload)
+
+    def send_drop_collision(self, drop_id: str, side: str):
+        payload = {
+            "type": "drop_collision",
+            "drop_id": drop_id,
+            "side": side,
+        }
+        self.send_message(payload)
+
     # 非阻塞请求接口，配合轮询使用
     def request_room_list(self):
         self.send_message({"type": "list_rooms"})

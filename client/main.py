@@ -10,6 +10,8 @@ from classes.Menu import Menu
 from classes.Sound import Sound
 from entities.Mario import Mario
 from entities.fireball import Fireball
+from entities.sky_drop import SkyDrop, SkyMushroom
+from typing import Optional
 from entities.remote_player import RemotePlayer
 from network.network_client import NetworkClient, NetworkError
 from ui.widgets import Button, TextInput, get_font
@@ -371,6 +373,9 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
     game_over_info = None
     death_wait_frames = None
     overlay_frames = None
+    active_drop_entities = {}
+    reported_drop_ids = set()
+    pending_drop_collision_requests = set()
 
     def handle_game_message(message, current_game_over):
         msg_type = message.get("type")
@@ -404,6 +409,20 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     projectiles[bullet_id] = Fireball(bullet_id, owner, position, direction, speed, level)
             elif event == "despawn" and bullet_id:
                 projectiles.pop(bullet_id, None)
+        elif msg_type == "spawn_drop":
+            spawn_drop_from_event(message)
+        elif msg_type == "drop_collected":
+            drop_id = message.get("drop_id")
+            if drop_id:
+                reported_drop_ids.add(drop_id)
+                remove_drop_by_id(level, drop_id, active_drop_entities)
+                pending_drop_collision_requests.discard(drop_id)
+        elif msg_type == "drop_direction":
+            drop_id = message.get("drop_id")
+            direction = message.get("direction")
+            if drop_id is not None:
+                set_drop_direction(drop_id, direction)
+                pending_drop_collision_requests.discard(drop_id)
         elif msg_type == "game_over":
             return message
         return current_game_over
@@ -416,6 +435,67 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
         if remote and remote.is_dying:
             return max(remote.death_timer, 0)
         return 60
+
+    def spawn_drop_from_event(event: dict):
+        drop_id = event.get("drop_id")
+        if drop_id and drop_id in active_drop_entities:
+            return
+        drop_type = event.get("drop_type", "coin")
+        spawn_x = event.get("x", 48)
+        direction = event.get("direction")
+        try:
+            spawn_x = float(spawn_x)
+        except (TypeError, ValueError):
+            return
+        if level.levelLength:
+            right_bound = max(96, level.levelLength * 32 - 48)
+        else:
+            right_bound = max(96, windowSize[0] - 48)
+        spawn_x = max(48, min(spawn_x, right_bound))
+        sky_drop = SkyDrop(drop_type, spawn_x, screen, level, level.sprites.spriteCollection, sound)
+        if drop_type == "mushroom" and direction in (-1, 1):
+            sky_drop.initial_direction = direction
+        if drop_id:
+            sky_drop.direction_callback = lambda did, side: handle_local_mushroom_event(did, side)
+        level.entityList.append(sky_drop)
+        if drop_id:
+            active_drop_entities[drop_id] = sky_drop
+            sky_drop.drop_id = drop_id
+
+    def handle_local_mushroom_event(drop_id: str, side: Optional[str]):
+        if side is None:
+            pending_drop_collision_requests.discard(drop_id)
+            return
+        if drop_id in pending_drop_collision_requests:
+            return
+        pending_drop_collision_requests.add(drop_id)
+        network.send_drop_collision(drop_id, side)
+
+    def set_drop_direction(drop_id: str, direction):
+        entity = find_drop_entity(drop_id)
+        if not entity:
+            return
+        if isinstance(entity, SkyDrop):
+            entity.initial_direction = direction
+            return
+        target = entity
+        replacement = getattr(entity, "spawned_entity", None)
+        if replacement is not None:
+            target = replacement
+            active_drop_entities[drop_id] = replacement
+        if isinstance(target, SkyMushroom):
+            target.apply_direction(direction)
+            target.clear_collision_request()
+
+    def find_drop_entity(drop_id: str):
+        entity = active_drop_entities.get(drop_id)
+        if entity is None:
+            for ent in level.entityList:
+                if getattr(ent, "drop_id", None) == drop_id:
+                    entity = ent
+                    active_drop_entities[drop_id] = ent
+                    break
+        return entity
 
     try:
         while not mario.restart:
@@ -436,6 +516,27 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                 dashboard.set_player_health(mario.hp)
                 dashboard.update()
                 mario.update()
+                for drop_id, entity in list(active_drop_entities.items()):
+                    replacement = getattr(entity, "spawned_entity", None)
+                    if replacement is not None:
+                        replacement.drop_id = drop_id
+                        active_drop_entities[drop_id] = replacement
+                        entity.spawned_entity = None
+                        entity = replacement
+                    if entity not in level.entityList or getattr(entity, "alive", True) is None:
+                        active_drop_entities.pop(drop_id, None)
+                        pending_drop_collision_requests.discard(drop_id)
+                        if drop_id not in reported_drop_ids:
+                            network.send_drop_collected(drop_id)
+                            reported_drop_ids.add(drop_id)
+                        continue
+                    mushroom = entity
+                    if isinstance(entity, SkyDrop):
+                        mushroom = getattr(entity, "spawned_entity", None)
+                    if isinstance(mushroom, SkyMushroom):
+                        if mushroom.pending_collision and drop_id not in pending_drop_collision_requests:
+                            handle_local_mushroom_event(drop_id, mushroom.pending_collision)
+
                 spawned_projectiles = mario.consume_spawned_projectiles()
                 for data in spawned_projectiles:
                     bullet_id = uuid.uuid4().hex
@@ -548,6 +649,27 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
             network.send_message({"type": "leave_room"})
         except Exception:
             pass
+
+
+def remove_drop_by_id(level: Level, drop_id: str, active_map: dict):
+    entity = active_map.pop(drop_id, None)
+    origin = entity
+    candidate = entity
+    if entity and getattr(entity, "spawned_entity", None):
+        candidate = entity.spawned_entity
+    if not candidate:
+        for ent in list(level.entityList):
+            if getattr(ent, "drop_id", None) == drop_id:
+                candidate = ent
+                break
+    drop = candidate
+    if origin and origin is not drop and origin in level.entityList:
+        level.entityList.remove(origin)
+        origin.alive = None
+    if drop and drop in level.entityList:
+        level.entityList.remove(drop)
+    if drop:
+        drop.alive = None
 
 
 def main():

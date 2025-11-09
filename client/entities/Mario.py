@@ -104,10 +104,23 @@ class Mario(EntityBase):
                     self._onCollisionWithMob(ent, collisionState)
 
     def _onCollisionWithItem(self, item):
-        self.levelObj.entityList.remove(item)
-        self.dashboard.points += 100
-        self.dashboard.coins += 1
-        self.sound.play_sfx(self.sound.coin)
+        drop_kind = getattr(item, "drop_type", "coin")
+        if item in self.levelObj.entityList:
+            self.levelObj.entityList.remove(item)
+        item.alive = None
+        if drop_kind == "mushroom":
+            self.powerup(1)
+            try:
+                self.sound.play_sfx(self.sound.powerup)
+            except AttributeError:
+                pass
+        else:
+            self.dashboard.points += 100
+            self.dashboard.coins += 1
+            try:
+                self.sound.play_sfx(self.sound.coin)
+            except AttributeError:
+                pass
 
     def _onCollisionWithBlock(self, block):
         if not block.triggered:
