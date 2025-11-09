@@ -332,7 +332,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
     mario.camera.move()
     remote_players = build_remote_players(room_ready_msg, username, level)
     fall_reported = False
-    fall_threshold = 32 * 18
+    fall_threshold = 440
 
     try:
         while not mario.restart:
@@ -378,6 +378,22 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
 
                 network.send_state(collect_local_state(mario, dashboard))
 
+                print(f"[client] {username} fell off the map, reporting to server, {fall_reported}, {mario.rect.bottom}, {fall_threshold}")
+                if not fall_reported and mario.rect.bottom > fall_threshold:
+                    fall_reported = True
+                    print(f"[client] {username} fell off the map, reporting to server")
+                    network.send_message({
+                        "type": "player_fall",
+                        "loser": username,
+                    })
+
+                if not game_over_info:
+                    extra_msgs = network.poll()
+                    for message in extra_msgs:
+                        if message.get("type") == "game_over":
+                            game_over_info = message
+                            break
+
                 if game_over_info:
                     overlay = pygame.Surface(windowSize, pygame.SRCALPHA)
                     overlay.fill((0, 0, 0, 180))
@@ -390,13 +406,6 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     pygame.display.update()
                     pygame.time.delay(2000)
                     break
-
-                if not fall_reported and mario.rect.y > fall_threshold:
-                    fall_reported = True
-                    network.send_message({
-                        "type": "player_fall",
-                        "loser": username,
-                    })
 
             pygame.display.update()
             clock.tick(max_frame_rate)
@@ -445,7 +454,9 @@ def main():
             payload = current_scene.payload
             run_game(screen, network, payload["username"], payload["room_ready"])
             network.close()
-            return "restart"
+            # 回到大厅，保持登录会话
+            network = NetworkClient()
+            current_scene = LobbyScene(screen, network, payload["username"])
 
 
 if __name__ == "__main__":

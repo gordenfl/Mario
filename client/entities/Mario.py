@@ -175,3 +175,7 @@ class Mario(EntityBase):
                 self.traits['goTrait'].updateAnimation(bigAnimation)
                 self.rect = pygame.Rect(self.rect.x, self.rect.y-32, 32, 64)
                 self.invincibilityFrames = 20
+
+    def applyGravity(self):
+        if self.obeyGravity:
+            self.vel.y += self.gravity

@@ -219,7 +219,7 @@ class GameServer:
         payload = {
             "type": "state_update",
             "username": client.username,
-            "state": message.get("state", {}),
+            "state": message.get("state", {}) or {},
         }
         await self.forward_to_room(client, payload)
 
@@ -261,12 +261,18 @@ class GameServer:
             room = self.rooms.get(client.room_id)
             if not room:
                 return
-            loser_member = next((m for m in room.members.values() if m.username == client.username), None)
-            if loser_member:
-                loser_member.hp = 0
-            winner_member = next((m for m in room.members.values() if m.username != client.username), None)
-            winner_name = winner_member.username if winner_member else client.username
-        await self._broadcast_game_over(room, winner_name, client.username)
+            loser_name = message.get("loser") or client.username
+            logging.info("Player %s reported fall in room %s", loser_name, client.room_id)
+            winner_name = None
+            for member in room.members.values():
+                if member.username == loser_name:
+                    member.hp = 0
+                else:
+                    winner_name = member.username
+            if not winner_name:
+                winner_name = client.username if client.username != loser_name else loser_name
+        await self._broadcast_game_over(room, winner_name, loser_name)
+        logging.info("Room %s game over: winner=%s loser=%s", room.room_id, winner_name, loser_name)
 
     async def _broadcast_game_over(self, room: Room, winner: str, loser: str):
         payload = {
