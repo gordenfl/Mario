@@ -30,6 +30,21 @@ class Level:
             self.loadEntities(data)
             self.levelLength = data["length"]
 
+    def is_solid_at_pixel(self, x: float, y: float) -> bool:
+        if not self.level:
+            return False
+        tile_x = int(x // 32)
+        tile_y = int(y // 32)
+        if tile_y < 0 or tile_y >= len(self.level):
+            return False
+        row = self.level[tile_y]
+        if row is None:
+            return False
+        if tile_x < 0 or tile_x >= len(row):
+            return False
+        tile = row[tile_x]
+        return tile is not None and tile.rect is not None
+
     def loadEntities(self, data):
         # 当前版本暂时不加载关卡中的敌人或道具
         self.entityList = []

@@ -42,12 +42,12 @@ class Mario(EntityBase):
         self.input = Input(self)
         self.inAir = False
         self.inJump = False
-        self.powerUpState = 0
+        self.powerUpState = 2
         self.invincibilityFrames = 0
         self.hp = 30
         self.traits = {
             "jumpTrait": JumpTrait(self),
-            "goTrait": GoTrait(smallAnimation, screen, self.camera, self),
+            "goTrait": GoTrait(bigAnimation, screen, self.camera, self),
             "bounceTrait": bounceTrait(self),
         }
 
@@ -59,10 +59,18 @@ class Mario(EntityBase):
         self.restart = False
         self.pause = False
         self.pauseObj = Pause(screen, self, dashboard)
+        self.canShoot = True
+        self.fireCooldown = 0
+        self.fire_button_held = False
+        self.spawned_projectiles = []
+        self.projectile_speed = 8
+        self._set_power_state(self.powerUpState, initialize=True)
 
     def update(self):
         if self.invincibilityFrames > 0:
             self.invincibilityFrames -= 1
+        if self.fireCooldown > 0:
+            self.fireCooldown -= 1
         self.updateTraits()
         self.moveMario()
         self.camera.move()
@@ -126,14 +134,13 @@ class Mario(EntityBase):
                 mob.leftrightTrait.direction = 1
                 self.sound.play_sfx(self.sound.kick)
         elif collisionState.isColliding and mob.alive and not self.invincibilityFrames:
-            if self.powerUpState == 0:
+            if self.powerUpState <= 0:
                 self.gameOver()
             elif self.powerUpState == 1:
-                self.powerUpState = 0
-                self.traits['goTrait'].updateAnimation(smallAnimation)
-                x, y = self.rect.x, self.rect.y
-                self.rect = pygame.Rect(x, y + 32, 32, 32)
-                self.invincibilityFrames = 60
+                self._set_power_state(0)
+                self.sound.play_sfx(self.sound.pipe)
+            else:
+                self._set_power_state(1)
                 self.sound.play_sfx(self.sound.pipe)
 
     def bounce(self):
@@ -169,13 +176,61 @@ class Mario(EntityBase):
         self.rect.y = y
         
     def powerup(self, powerupID):
-        if self.powerUpState == 0:
-            if powerupID == 1:
-                self.powerUpState = 1
-                self.traits['goTrait'].updateAnimation(bigAnimation)
-                self.rect = pygame.Rect(self.rect.x, self.rect.y-32, 32, 64)
-                self.invincibilityFrames = 20
+        if powerupID == 1:
+            if self.powerUpState <= 0:
+                self._set_power_state(1)
+        elif powerupID == 2:
+            self._set_power_state(2)
 
     def applyGravity(self):
         if self.obeyGravity:
             self.vel.y += self.gravity
+
+    def handle_fire_input(self, pressed: bool):
+        if not self.canShoot:
+            self.fire_button_held = pressed
+            return
+        if pressed:
+            if not self.fire_button_held and self.fireCooldown == 0:
+                self._queue_fireball()
+            self.fire_button_held = True
+        else:
+            self.fire_button_held = False
+
+    def consume_spawned_projectiles(self):
+        if not self.spawned_projectiles:
+            return []
+        queued = self.spawned_projectiles[:]
+        self.spawned_projectiles.clear()
+        return queued
+
+    def _queue_fireball(self):
+        direction = self.traits['goTrait'].heading or 1
+        spawn_x = self.rect.centerx + direction * 20
+        spawn_y = self.rect.centery - 10
+        self.spawned_projectiles.append(
+            {
+                "position": [spawn_x, spawn_y],
+                "direction": direction,
+                "speed": self.projectile_speed,
+            }
+        )
+        self.fireCooldown = 18
+
+    def _set_power_state(self, state, initialize=False):
+        state = max(0, min(state, 2))
+        self.powerUpState = state
+        midbottom = self.rect.midbottom
+        if state == 0:
+            self.traits['goTrait'].updateAnimation(smallAnimation)
+            self.rect = pygame.Rect(0, 0, 32, 32)
+            self.canShoot = False
+        else:
+            self.traits['goTrait'].updateAnimation(bigAnimation)
+            self.rect = pygame.Rect(0, 0, 32, 64)
+            self.canShoot = state >= 2
+        self.rect.midbottom = midbottom
+        if not initialize:
+            self.invincibilityFrames = 60
+        if state >= 2:
+            self.fireCooldown = 0

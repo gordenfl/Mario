@@ -1,5 +1,6 @@
 import random
 import sys
+import uuid
 
 import pygame
 
@@ -8,6 +9,7 @@ from classes.Level import Level
 from classes.Menu import Menu
 from classes.Sound import Sound
 from entities.Mario import Mario
+from entities.fireball import Fireball
 from entities.remote_player import RemotePlayer
 from network.network_client import NetworkClient, NetworkError
 from ui.widgets import Button, TextInput, get_font
@@ -129,6 +131,11 @@ class LobbyScene(Scene):
             text="退出登录",
             callback=self.exit_to_login,
         )
+        self.button_cancel = Button(
+            rect=(windowSize[0] // 2 - 90, windowSize[1] // 2 + 60, 180, 48),
+            text="取消等待",
+            callback=self.cancel_waiting,
+        )
         self.overlay_font = get_font(32)
         self.network.request_room_list()
 
@@ -153,11 +160,25 @@ class LobbyScene(Scene):
         self.message = "正在创建房间..."
         self.network.request_create_room()
 
+    def cancel_waiting(self):
+        if not self.waiting:
+            return
+        try:
+            self.network.send_message({"type": "leave_room"})
+        except Exception:
+            pass
+        self.waiting = False
+        self.waiting_room_id = None
+        self.message = "已取消等待，刷新房间列表中..."
+        self.network.request_room_list()
+
     def handle_events(self, events):
         for event in events:
             self.button_refresh.handle_event(event)
             self.button_create.handle_event(event)
             self.button_leave.handle_event(event)
+            if self.waiting:
+                self.button_cancel.handle_event(event)
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if not self.waiting:
                     clicked_room = self._get_room_at_pos(event.pos)
@@ -172,6 +193,8 @@ class LobbyScene(Scene):
         self.button_refresh.update(mouse_pos)
         self.button_create.update(mouse_pos)
         self.button_leave.update(mouse_pos)
+        if self.waiting:
+            self.button_cancel.update(mouse_pos)
         self.last_refresh_time += dt_ms
         if (
             not self.waiting
@@ -208,10 +231,12 @@ class LobbyScene(Scene):
                 self.waiting = False
                 self.waiting_room_id = None
                 self.message = "对方离开了房间，您已退出等待状态。"
+                self.network.request_room_list()
             elif msg_type == "error":
                 self.message = message.get("message", "发生错误")
                 self.waiting = False
                 self.waiting_room_id = None
+                self.network.request_room_list()
             elif msg_type == "hp_update":
                 # ignore in lobby
                 pass
@@ -265,6 +290,9 @@ class LobbyScene(Scene):
             self.screen.blit(
                 text, text.get_rect(center=(windowSize[0] // 2, windowSize[1] // 2))
             )
+            self.button_cancel.rect.centerx = windowSize[0] // 2
+            self.button_cancel.rect.top = windowSize[1] // 2 + 40
+            self.button_cancel.draw(self.screen)
 
     def _get_room_at_pos(self, pos):
         for room in self.rooms:
@@ -333,8 +361,39 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
     mario.camera.snap_to_entity()
     mario.camera.move()
     remote_players = build_remote_players(room_ready_msg, username, level)
+    projectiles: dict[str, Fireball] = {}
     fall_reported = False
     fall_threshold = 440
+
+    def handle_game_message(message, current_game_over):
+        msg_type = message.get("type")
+        if msg_type == "state_update":
+            username_msg = message.get("username")
+            if username_msg and username_msg != username:
+                remote = remote_players.get(username_msg)
+                if not remote:
+                    remote = RemotePlayer(username_msg)
+                    remote_players[username_msg] = remote
+                remote.update_from_state(message.get("state", {}))
+        elif msg_type == "hp_update":
+            mario.hp = message.get("hp", mario.hp)
+        elif msg_type == "player_hit":
+            pass
+        elif msg_type == "bullet_event":
+            event = message.get("event")
+            bullet_id = message.get("bullet_id")
+            owner = message.get("owner")
+            if event == "spawn" and bullet_id:
+                if bullet_id not in projectiles and owner != username:
+                    position = message.get("position", [0, 0])
+                    direction = message.get("direction", 1)
+                    speed = message.get("speed", 8)
+                    projectiles[bullet_id] = Fireball(bullet_id, owner, position, direction, speed, level)
+            elif event == "despawn" and bullet_id:
+                projectiles.pop(bullet_id, None)
+        elif msg_type == "game_over":
+            return message
+        return current_game_over
 
     try:
         while not mario.restart:
@@ -354,35 +413,68 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                 level.drawLevel(mario.camera)
                 dashboard.update()
                 mario.update()
+                spawned_projectiles = mario.consume_spawned_projectiles()
+                for data in spawned_projectiles:
+                    bullet_id = uuid.uuid4().hex
+                    direction = data.get("direction", 1)
+                    position = data.get("position", [mario.rect.centerx, mario.rect.centery])
+                    speed = data.get("speed", 8)
+                    projectiles[bullet_id] = Fireball(bullet_id, username, position, direction, speed, level)
+                    network.send_bullet_event({
+                        "event": "spawn",
+                        "bullet_id": bullet_id,
+                        "owner": username,
+                        "position": position,
+                        "direction": direction,
+                        "speed": speed,
+                    })
 
                 messages = network.poll()
                 game_over_info = None
                 for message in messages:
-                    msg_type = message.get("type")
-                    if msg_type == "state_update":
-                        username_msg = message.get("username")
-                        if username_msg and username_msg != username:
-                            remote = remote_players.get(username_msg)
-                            if not remote:
-                                remote = RemotePlayer(username_msg)
-                                remote_players[username_msg] = remote
-                            remote.update_from_state(message.get("state", {}))
-                            camera_world_x = mario.rect.x - (10 * 32)
-                            screen_x = remote.rect.x - camera_world_x
-                    elif msg_type == "hp_update":
-                        mario.hp = message.get("hp", mario.hp)
-                    elif msg_type == "player_hit":
-                        pass
-                    elif msg_type == "game_over":
-                        game_over_info = message
+                    game_over_info = handle_game_message(message, game_over_info)
+                    if game_over_info:
                         break
 
                 raw_camera_x = mario.rect.x - (10 * 32)
                 max_camera_world_x = max(level.levelLength * 32 - windowSize[0], 0)
                 camera_world_x = max(0, min(raw_camera_x, max_camera_world_x))
                 camera_world_y = 0
+                level_width = max(level.levelLength * 32, windowSize[0])
+                for bullet_id, bullet in list(projectiles.items()):
+                    bullet.update()
+                    if bullet.owner == username:
+                        hit_target = None
+                        for remote in remote_players.values():
+                            if remote.visible and bullet.rect.colliderect(remote.rect):
+                                hit_target = remote.username
+                                break
+                        if hit_target:
+                            network.send_player_hit(hit_target, damage=5)
+                            network.send_bullet_event({
+                                "event": "despawn",
+                                "bullet_id": bullet_id,
+                                "owner": username,
+                            })
+                            projectiles.pop(bullet_id, None)
+                            continue
+                        if bullet.should_despawn(level_width):
+                            network.send_bullet_event({
+                                "event": "despawn",
+                                "bullet_id": bullet_id,
+                                "owner": username,
+                            })
+                            projectiles.pop(bullet_id, None)
+                            continue
+                    else:
+                        if bullet.should_despawn(level_width):
+                            projectiles.pop(bullet_id, None)
+                            continue
+
                 for remote in remote_players.values():
                     remote.draw(screen, camera_world_x, camera_world_y)
+                for bullet in projectiles.values():
+                    bullet.draw(screen, camera_world_x, camera_world_y)
 
                 network.send_state(collect_local_state(mario, dashboard))
                 if not fall_reported and mario.rect.bottom > fall_threshold:
@@ -396,8 +488,8 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                 if not game_over_info:
                     extra_msgs = network.poll()
                     for message in extra_msgs:
-                        if message.get("type") == "game_over":
-                            game_over_info = message
+                        game_over_info = handle_game_message(message, game_over_info)
+                        if game_over_info:
                             break
 
                 if game_over_info:

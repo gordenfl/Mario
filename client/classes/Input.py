@@ -25,10 +25,15 @@ class Input:
         else:
             self.entity.traits['goTrait'].direction = 0
 
-        isJumping = pressedKeys[K_SPACE] or pressedKeys[K_UP] or pressedKeys[K_k]
+        isJumping = pressedKeys[K_SPACE] or pressedKeys[K_UP]
         self.entity.traits['jumpTrait'].jump(isJumping)
 
         self.entity.traits['goTrait'].boost = pressedKeys[K_LSHIFT]
+
+        fire_pressed = pressedKeys[K_k]
+        handler = getattr(self.entity, "handle_fire_input", None)
+        if handler:
+            handler(fire_pressed)
 
     def checkForMouseInput(self, events):
         mouseX, mouseY = pygame.mouse.get_pos()
