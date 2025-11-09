@@ -325,6 +325,7 @@ def build_remote_players(room_msg: dict, local_username: str, level: Level) -> d
             rp.rect.x = spawn_x
             rp.rect.y = spawn_y
             rp.state["position"] = [spawn_x, spawn_y]
+            rp.prev_position = [spawn_x, spawn_y]
             rp.visible = True
             remote[username] = rp
     return remote
@@ -339,6 +340,8 @@ def collect_local_state(mario: Mario, dashboard: Dashboard) -> dict:
         "hp": getattr(mario, "hp", 30),
         "power": getattr(mario, "powerUpState", 0),
         "score": dashboard.points,
+        "dying": getattr(mario, "is_dying", False),
+        "death_timer": getattr(mario, "death_timer", 0),
     }
 
 
@@ -360,10 +363,14 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
     mario.setPos(spawn_x, spawn_y)
     mario.camera.snap_to_entity()
     mario.camera.move()
+    dashboard.set_player_health(mario.hp, mario.hp)
     remote_players = build_remote_players(room_ready_msg, username, level)
     projectiles: dict[str, Fireball] = {}
     fall_reported = False
     fall_threshold = 440
+    game_over_info = None
+    death_wait_frames = None
+    overlay_frames = None
 
     def handle_game_message(message, current_game_over):
         msg_type = message.get("type")
@@ -371,12 +378,18 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
             username_msg = message.get("username")
             if username_msg and username_msg != username:
                 remote = remote_players.get(username_msg)
+                state_payload = message.get("state", {}) or {}
                 if not remote:
                     remote = RemotePlayer(username_msg)
                     remote_players[username_msg] = remote
-                remote.update_from_state(message.get("state", {}))
+                    initial_pos = state_payload.get("position", [remote.rect.x, remote.rect.y])
+                    remote.prev_position = list(initial_pos)
+                    remote.state["position"] = list(initial_pos)
+                remote.update_from_state(state_payload)
         elif msg_type == "hp_update":
             mario.hp = message.get("hp", mario.hp)
+            if mario.hp <= 0 and not mario.is_dying:
+                mario.begin_death()
         elif msg_type == "player_hit":
             pass
         elif msg_type == "bullet_event":
@@ -395,6 +408,15 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
             return message
         return current_game_over
 
+    def compute_death_wait_frames(game_over_message):
+        loser = game_over_message.get("loser")
+        if loser == username:
+            return max(mario.death_timer, 0)
+        remote = remote_players.get(loser)
+        if remote and remote.is_dying:
+            return max(remote.death_timer, 0)
+        return 60
+
     try:
         while not mario.restart:
             for event in pygame.event.get():
@@ -411,6 +433,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                 mario.pauseObj.update()
             else:
                 level.drawLevel(mario.camera)
+                dashboard.set_player_health(mario.hp)
                 dashboard.update()
                 mario.update()
                 spawned_projectiles = mario.consume_spawned_projectiles()
@@ -430,7 +453,6 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     })
 
                 messages = network.poll()
-                game_over_info = None
                 for message in messages:
                     game_over_info = handle_game_message(message, game_over_info)
                     if game_over_info:
@@ -467,6 +489,9 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                             projectiles.pop(bullet_id, None)
                             continue
                     else:
+                        if not mario.is_dying and bullet.rect.colliderect(mario.rect):
+                            projectiles.pop(bullet_id, None)
+                            continue
                         if bullet.should_despawn(level_width):
                             projectiles.pop(bullet_id, None)
                             continue
@@ -477,7 +502,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     bullet.draw(screen, camera_world_x, camera_world_y)
 
                 network.send_state(collect_local_state(mario, dashboard))
-                if not fall_reported and mario.rect.bottom > fall_threshold:
+                if not fall_reported and not mario.is_dying and mario.rect.bottom > fall_threshold:
                     fall_reported = True
                     print(f"[client] {username} fell off the map, reporting to server")
                     network.send_message({
@@ -493,6 +518,14 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                             break
 
                 if game_over_info:
+                    if death_wait_frames is None:
+                        death_wait_frames = compute_death_wait_frames(game_over_info)
+                        overlay_frames = 180
+                    if death_wait_frames > 0:
+                        death_wait_frames -= 1
+                        pygame.display.update()
+                        clock.tick(max_frame_rate)
+                        continue
                     overlay = pygame.Surface(windowSize, pygame.SRCALPHA)
                     overlay.fill((0, 0, 0, 180))
                     screen.blit(overlay, (0, 0))
@@ -502,7 +535,10 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     label = font.render(text, True, (255, 255, 255))
                     screen.blit(label, label.get_rect(center=(windowSize[0] // 2, windowSize[1] // 2)))
                     pygame.display.update()
-                    pygame.time.delay(2000)
+                    overlay_frames -= 1
+                    if overlay_frames > 0:
+                        clock.tick(max_frame_rate)
+                        continue
                     break
 
             pygame.display.update()

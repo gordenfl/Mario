@@ -35,6 +35,8 @@ class RemotePlayer:
         self.color = color
         self.rect = pygame.Rect(0, 0, 32, 48)
         self.visible = False
+        self.is_dying = False
+        self.death_timer = 0
         self.prev_position = [0, 0]
         self.state = {
             "position": [0, 0],
@@ -49,27 +51,50 @@ class RemotePlayer:
         self.state.update(state)
         self.rect.x = int(position[0])
         self.rect.y = int(position[1])
-        dx = position[0] - self.prev_position[0]
-        dy = position[1] - self.prev_position[1]
-        power = self.state.get("power", 0)
-        if power >= 1:
-            if self.current_animation is not self.big_animation:
-                self.current_animation = self.big_animation
-            self.rect.height = 64
-        else:
-            if self.current_animation is not self.small_animation:
+        prev_pos = self.prev_position if hasattr(self, "prev_position") else [position[0], position[1]]
+        dx = position[0] - prev_pos[0]
+        dy = position[1] - prev_pos[1]
+        dying = state.get("dying", False)
+        death_timer = state.get("death_timer", 0)
+        if dying:
+            if not self.is_dying:
                 self.current_animation = self.small_animation
+                self.current_animation.inAir()
+            self.is_dying = True
+            self.death_timer = death_timer
+            self.heading = 0
             self.rect.height = 48
-        if dx > 0.5:
-            self.heading = 1
-            self.current_animation.update()
-        elif dx < -0.5:
-            self.heading = -1
-            self.current_animation.update()
         else:
-            self.current_animation.idle()
-        if abs(dy) > 1.0:
+            self.is_dying = False
+            self.death_timer = 0
+
+        power = self.state.get("power", 0)
+        if not self.is_dying:
+            if power >= 1:
+                if self.current_animation is not self.big_animation:
+                    self.current_animation = self.big_animation
+                self.rect.height = 64
+            else:
+                if self.current_animation is not self.small_animation:
+                    self.current_animation = self.small_animation
+                self.rect.height = 48
+        else:
             self.current_animation.inAir()
+
+        if not self.is_dying:
+            if dx > 0.5:
+                self.heading = 1
+                self.current_animation.update()
+            elif dx < -0.5:
+                self.heading = -1
+                self.current_animation.update()
+            else:
+                self.current_animation.idle()
+            if abs(dy) > 1.0:
+                self.current_animation.inAir()
+        else:
+            self.current_animation.inAir()
+
         self.prev_position = list(position)
         self.visible = True
 

@@ -64,9 +64,17 @@ class Mario(EntityBase):
         self.fire_button_held = False
         self.spawned_projectiles = []
         self.projectile_speed = 8
+        self.is_dying = False
+        self.death_timer = 0
         self._set_power_state(self.powerUpState, initialize=True)
 
     def update(self):
+        if self.is_dying:
+            self.update_death()
+            self.traits["goTrait"].animation.inAir()
+            self.traits["goTrait"].drawEntity()
+            self.camera.move()
+            return
         if self.invincibilityFrames > 0:
             self.invincibilityFrames -= 1
         if self.fireCooldown > 0:
@@ -216,6 +224,31 @@ class Mario(EntityBase):
             }
         )
         self.fireCooldown = 18
+
+    def begin_death(self):
+        if self.is_dying:
+            return
+        self.is_dying = True
+        self.death_timer = 180
+        self.canShoot = False
+        self.fire_button_held = False
+        self.traits['goTrait'].direction = 0
+        self.vel.x = 0
+        self.vel.y = -9
+        self._set_power_state(0)
+        self.invincibilityFrames = 0
+        self.traits['goTrait'].animation.inAir()
+
+    def update_death(self):
+        if self.death_timer > 0:
+            self.death_timer -= 1
+        else:
+            self.death_timer = 0
+        self.rect.y += self.vel.y
+        self.vel.y += self.gravity
+
+    def death_finished(self):
+        return self.is_dying and self.death_timer <= 0
 
     def _set_power_state(self, state, initialize=False):
         state = max(0, min(state, 2))
