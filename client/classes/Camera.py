@@ -8,9 +8,20 @@ class Camera:
         self.x = self.pos.x * 32
         self.y = self.pos.y * 32
 
-    def move(self):
+    def _calculate_offset(self):
         xPosFloat = self.entity.getPosIndexAsFloat().x
-        if 10 < xPosFloat < 50:
-            self.pos.x = -xPosFloat + 10
+        if xPosFloat <= 10:
+            return 0
+        if xPosFloat >= 50:
+            return -40
+        return -xPosFloat + 10
+
+    def snap_to_entity(self):
+        self.pos.x = self._calculate_offset()
+        self.x = self.pos.x * 32
+        self.y = self.pos.y * 32
+
+    def move(self):
+        self.pos.x = self._calculate_offset()
         self.x = self.pos.x * 32
         self.y = self.pos.y * 32

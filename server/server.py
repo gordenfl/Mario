@@ -102,6 +102,8 @@ class GameServer:
             await self.forward_to_room(client, message)
         elif msg_type == "player_hit":
             await self.handle_player_hit(client, message)
+        elif msg_type == "player_fall":
+            await self.handle_player_fall(client, message)
         else:
             await self.send_error(client, "unknown_type", f"Unknown message type: {msg_type}")
 
@@ -226,6 +228,7 @@ class GameServer:
             return
         target = message.get("target")
         damage = message.get("damage", 1)
+        defeated_member: Optional[ClientSession] = None
         async with self.lock:
             room = self.rooms.get(client.room_id)
             if not room:
@@ -237,6 +240,9 @@ class GameServer:
                         "type": "hp_update",
                         "hp": member.hp,
                     })
+                    if member.hp == 0:
+                        defeated_member = member
+                    break
         payload = {
             "type": "player_hit",
             "source": client.username,
@@ -244,6 +250,33 @@ class GameServer:
             "damage": damage,
         }
         await self.forward_to_room(client, payload)
+        if defeated_member:
+            await self._broadcast_game_over(
+                room, client.username, defeated_member.username
+            )
+    async def handle_player_fall(self, client: ClientSession, message: Dict):
+        if not client.room_id:
+            return
+        async with self.lock:
+            room = self.rooms.get(client.room_id)
+            if not room:
+                return
+            loser_member = next((m for m in room.members.values() if m.username == client.username), None)
+            if loser_member:
+                loser_member.hp = 0
+            winner_member = next((m for m in room.members.values() if m.username != client.username), None)
+            winner_name = winner_member.username if winner_member else client.username
+        await self._broadcast_game_over(room, winner_name, client.username)
+
+    async def _broadcast_game_over(self, room: Room, winner: str, loser: str):
+        payload = {
+            "type": "game_over",
+            "winner": winner,
+            "loser": loser,
+            "room_id": room.room_id,
+        }
+        for member in list(room.members.values()):
+            await self.send(member, payload)
 
     async def forward_to_room(self, client: ClientSession, message: Dict):
         if not client.room_id:

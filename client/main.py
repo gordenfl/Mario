@@ -328,13 +328,20 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
     spawn = room_ready_msg.get("your_spawn", "left")
     spawn_x, spawn_y = compute_spawn_position(spawn, level)
     mario.setPos(spawn_x, spawn_y)
+    mario.camera.snap_to_entity()
+    mario.camera.move()
     remote_players = build_remote_players(room_ready_msg, username, level)
+    fall_reported = False
+    fall_threshold = 32 * 18
 
     try:
         while not mario.restart:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    network.send_message({"type": "leave_room"})
+                    try:
+                        network.send_message({"type": "leave_room"})
+                    except Exception:
+                        pass
                     network.close()
                     pygame.quit()
                     sys.exit(0)
@@ -347,6 +354,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                 mario.update()
 
                 messages = network.poll()
+                game_over_info = None
                 for message in messages:
                     msg_type = message.get("type")
                     if msg_type == "state_update":
@@ -361,11 +369,34 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                         mario.hp = message.get("hp", mario.hp)
                     elif msg_type == "player_hit":
                         pass
+                    elif msg_type == "game_over":
+                        game_over_info = message
+                        break
 
                 for remote in remote_players.values():
                     remote.draw(screen, mario.camera.x, mario.camera.y)
 
                 network.send_state(collect_local_state(mario, dashboard))
+
+                if game_over_info:
+                    overlay = pygame.Surface(windowSize, pygame.SRCALPHA)
+                    overlay.fill((0, 0, 0, 180))
+                    screen.blit(overlay, (0, 0))
+                    font = get_font(42)
+                    winner = game_over_info.get("winner", "玩家")
+                    text = f"{winner} 获胜！"
+                    label = font.render(text, True, (255, 255, 255))
+                    screen.blit(label, label.get_rect(center=(windowSize[0] // 2, windowSize[1] // 2)))
+                    pygame.display.update()
+                    pygame.time.delay(2000)
+                    break
+
+                if not fall_reported and mario.rect.y > fall_threshold:
+                    fall_reported = True
+                    network.send_message({
+                        "type": "player_fall",
+                        "loser": username,
+                    })
 
             pygame.display.update()
             clock.tick(max_frame_rate)
@@ -401,6 +432,7 @@ def main():
         current_scene.handle_network(messages)
         current_scene.update(dt_ms)
         current_scene.draw()
+
         pygame.display.flip()
 
         if current_scene.next_scene == "login":
