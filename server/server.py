@@ -168,18 +168,25 @@ class GameServer:
                     "players": [m.username for m in room.members.values()],
                 })
             return
+        spawn_slots = ["left", "right"]
+        spawn_map = {}
+        members_ordered = list(room.members.values())
+        for member, slot in zip(members_ordered, spawn_slots):
+            spawn_map[member.id] = slot
         players = [
             {
                 "username": member.username,
                 "hp": member.hp,
+                "spawn": spawn_map.get(member.id, "left"),
             }
-            for member in room.members.values()
+            for member in members_ordered
         ]
-        for member in room.members.values():
+        for member in members_ordered:
             await self.send(member, {
                 "type": "room_ready",
                 "room_id": room.room_id,
                 "players": players,
+                "your_spawn": spawn_map.get(member.id, "left"),
             })
 
     async def handle_leave_room(self, client: ClientSession):

@@ -274,12 +274,29 @@ class LobbyScene(Scene):
         return None
 
 
-def build_remote_players(room_msg: dict, local_username: str) -> dict:
+def compute_spawn_position(spawn: str, level: Level) -> tuple[int, int]:
+    base_y = 32 * 11
+    if spawn == "right":
+        if level.levelLength:
+            spawn_x = max((level.levelLength - 3) * 32, windowSize[0] - 96)
+        else:
+            spawn_x = windowSize[0] - 96
+    else:
+        spawn_x = 48
+    return spawn_x, base_y
+
+
+def build_remote_players(room_msg: dict, local_username: str, level: Level) -> dict:
     remote = {}
     for player in room_msg.get("players", []):
         username = player.get("username")
         if username and username != local_username:
-            remote[username] = RemotePlayer(username)
+            spawn = player.get("spawn", "right")
+            rp = RemotePlayer(username)
+            spawn_x, spawn_y = compute_spawn_position(spawn, level)
+            rp.rect.x = spawn_x
+            rp.rect.y = spawn_y
+            remote[username] = rp
     return remote
 
 
@@ -308,7 +325,10 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
     menu.start = True
 
     mario = Mario(0, 0, level, screen, dashboard, sound)
-    remote_players = build_remote_players(room_ready_msg, username)
+    spawn = room_ready_msg.get("your_spawn", "left")
+    spawn_x, spawn_y = compute_spawn_position(spawn, level)
+    mario.setPos(spawn_x, spawn_y)
+    remote_players = build_remote_players(room_ready_msg, username, level)
 
     try:
         while not mario.restart:
