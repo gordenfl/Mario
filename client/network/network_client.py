@@ -72,14 +72,14 @@ class NetworkClient:
         return response.get("rooms", []) if response else []
 
     def create_room(self) -> Optional[str]:
-        self.send_message({"type": "create_room"})
+        self.request_create_room()
         response = self.wait_for_message("room_created")
         if response:
             self.room_id = response.get("room_id")
         return self.room_id
 
     def join_room(self, room_id: str) -> bool:
-        self.send_message({"type": "join_room", "room_id": room_id})
+        self.request_join_room(room_id)
         response = self.wait_for_message("room_joined", timeout=5)
         if response:
             self.room_id = room_id
@@ -116,6 +116,16 @@ class NetworkClient:
             "damage": damage,
         }
         self.send_message(payload)
+
+    # 非阻塞请求接口，配合轮询使用
+    def request_room_list(self):
+        self.send_message({"type": "list_rooms"})
+
+    def request_create_room(self):
+        self.send_message({"type": "create_room"})
+
+    def request_join_room(self, room_id: str):
+        self.send_message({"type": "join_room", "room_id": room_id})
 
     def send_message(self, message: Dict):
         data = json.dumps(message) + NEWLINE

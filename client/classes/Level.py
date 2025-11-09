@@ -84,21 +84,29 @@ class Level:
                 self.entityList.remove(entity)
 
     def drawLevel(self, camera):
-        try:
-            for y in range(0, 15):
-                for x in range(0 - int(camera.pos.x + 1), 20 - int(camera.pos.x - 1)):
-                    if self.level[y][x].sprite is not None:
-                        if self.level[y][x].sprite.redrawBackground:
-                            self.screen.blit(
-                                self.sprites.spriteCollection.get("sky").image,
-                                ((x + camera.pos.x) * 32, y * 32),
-                            )
-                        self.level[y][x].sprite.drawSprite(
-                            x + camera.pos.x, y, self.screen
-                        )
-            self.updateEntities(camera)
-        except IndexError:
+        if not self.level:
             return
+        max_rows = len(self.level)
+        for y in range(0, min(15, max_rows)):
+            row = self.level[y]
+            if row is None:
+                continue
+            max_cols = len(row)
+            for x in range(0 - int(camera.pos.x + 1), 20 - int(camera.pos.x - 1)):
+                if x < 0 or x >= max_cols:
+                    continue
+                tile = row[x]
+                if tile is None or tile.sprite is None:
+                    continue
+                if tile.sprite.redrawBackground:
+                    self.screen.blit(
+                        self.sprites.spriteCollection.get("sky").image,
+                        ((x + camera.pos.x) * 32, y * 32),
+                    )
+                tile.sprite.drawSprite(
+                    x + camera.pos.x, y, self.screen
+                )
+        self.updateEntities(camera)
 
     def addCloudSprite(self, x, y):
         try:
