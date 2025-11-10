@@ -12,6 +12,7 @@ from traits.bounce import bounceTrait
 from traits.go import GoTrait
 from traits.jump import JumpTrait
 from classes.Pause import Pause
+from ui.widgets import get_font
 
 spriteCollection = Sprites().spriteCollection
 smallAnimation = Animation(
@@ -67,6 +68,7 @@ class Mario(EntityBase):
         self.is_dying = False
         self.death_timer = 0
         self._set_power_state(self.powerUpState, initialize=True)
+        self.float_messages = []
 
     def update(self):
         if self.is_dying:
@@ -85,6 +87,7 @@ class Mario(EntityBase):
         self.applyGravity()
         self.checkEntityCollision()
         self.input.checkForInput()
+        self._update_float_messages()
 
     def moveMario(self):
         self.rect.y += self.vel.y
@@ -110,6 +113,10 @@ class Mario(EntityBase):
         item.alive = None
         if drop_kind == "mushroom":
             self.powerup(1)
+            if self.hp < 30:
+                self.hp = min(30, self.hp + 5)
+                self.dashboard.set_player_health(self.hp)
+                self._add_float_message("+5", self.rect.midtop)
             try:
                 self.sound.play_sfx(self.sound.powerup)
             except AttributeError:
@@ -117,6 +124,10 @@ class Mario(EntityBase):
         else:
             self.dashboard.points += 100
             self.dashboard.coins += 1
+            if self.hp < 30:
+                self.hp = min(30, self.hp + 1)
+                self.dashboard.set_player_health(self.hp)
+                self._add_float_message("+1", self.rect.midtop)
             try:
                 self.sound.play_sfx(self.sound.coin)
             except AttributeError:
@@ -280,3 +291,24 @@ class Mario(EntityBase):
             self.invincibilityFrames = 60
         if state >= 2:
             self.fireCooldown = 0
+
+    def _add_float_message(self, text: str, position):
+        font = get_font(18)
+        msg = {
+            "text": font.render(text, True, (255, 255, 255)),
+            "pos": [position[0], position[1] - 10],
+            "ttl": 45,
+        }
+        self.float_messages.append(msg)
+
+    def _update_float_messages(self):
+        if not self.float_messages:
+            return
+        for msg in list(self.float_messages):
+            msg["pos"][1] -= 0.5
+            msg["ttl"] -= 1
+            if msg["ttl"] <= 0:
+                self.float_messages.remove(msg)
+                continue
+            draw_x = msg["pos"][0] + self.camera.x - msg["text"].get_width() // 2
+            self.screen.blit(msg["text"], (draw_x, msg["pos"][1]))

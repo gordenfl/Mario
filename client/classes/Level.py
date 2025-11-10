@@ -70,19 +70,35 @@ class Level:
         self.level = list(map(list, zip(*layers)))
 
     def loadObjects(self, data):
-        for x, y in data["level"]["objects"]["bush"]:
-            self.addBushSprite(x, y)
-        for x, y in data["level"]["objects"]["cloud"]:
-            self.addCloudSprite(x, y)
-        for x, y, z in data["level"]["objects"]["pipe"]:
-            self.addPipeSprite(x, y, z)
-        for x, y in data["level"]["objects"]["sky"]:
-            self.level[y][x] = Tile(self.sprites.spriteCollection.get("sky"), None)
-        for x, y in data["level"]["objects"]["ground"]:
-            self.level[y][x] = Tile(
-                self.sprites.spriteCollection.get("ground"),
-                pygame.Rect(x * 32, y * 32, 32, 32),
+        def in_bounds(tile_x, tile_y):
+            return (
+                self.level
+                and 0 <= tile_y < len(self.level)
+                and self.level[tile_y] is not None
+                and 0 <= tile_x < len(self.level[tile_y])
             )
+
+        for x, y in data["level"]["objects"].get("bush", []):
+            self.addBushSprite(x, y)
+        for x, y in data["level"]["objects"].get("cloud", []):
+            self.addCloudSprite(x, y)
+        for x, y, z in data["level"]["objects"].get("pipe", []):
+            self.addPipeSprite(x, y, z)
+        for x, y in data["level"]["objects"].get("sky", []):
+            if in_bounds(x, y):
+                self.level[y][x] = Tile(self.sprites.spriteCollection.get("sky"), None)
+        for x, y in data["level"]["objects"].get("ground", []):
+            if in_bounds(x, y):
+                self.level[y][x] = Tile(
+                    self.sprites.spriteCollection.get("ground"),
+                    pygame.Rect(x * 32, y * 32, 32, 32),
+                )
+        for x, y in data["level"]["objects"].get("bricks", []):
+            if in_bounds(x, y):
+                self.level[y][x] = Tile(
+                    self.sprites.spriteCollection.get("bricks"),
+                    pygame.Rect(x * 32, y * 32, 32, 32),
+                )
 
     def updateEntities(self, cam):
         for entity in self.entityList:
