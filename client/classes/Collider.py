@@ -16,10 +16,11 @@ class Collider:
             ]
         except Exception:
             return
+        base_index = self.entity.getPosIndex()
         for row in rows:
-            tiles = row[self.entity.getPosIndex().x : self.entity.getPosIndex().x + 2]
+            tiles = row[base_index.x : base_index.x + 2]
             for tile in tiles:
-                if tile.rect is not None:
+                if tile is not None and tile.rect is not None:
                     if self.entity.rect.colliderect(tile.rect):
                         if self.entity.vel.x > 0:
                             self.entity.rect.right = tile.rect.left
@@ -30,12 +31,13 @@ class Collider:
 
     def checkY(self):
         self.entity.onGround = False
-        
+        base_index = self.entity.getPosIndex()
+
         try:
             rows = [
-                self.level[self.entity.getPosIndex().y],
-                self.level[self.entity.getPosIndex().y + 1],
-                self.level[self.entity.getPosIndex().y + 2],
+                (base_index.y, self.level[base_index.y]),
+                (base_index.y + 1, self.level[base_index.y + 1]),
+                (base_index.y + 2, self.level[base_index.y + 2]),
             ]
         except Exception:
             try:
@@ -43,24 +45,32 @@ class Collider:
             except Exception:
                 self.entity.alive = None
             return
-        for row in rows:
-            tiles = row[self.entity.getPosIndex().x : self.entity.getPosIndex().x + 2]
-            for tile in tiles:
-                if tile.rect is not None:
-                    if self.entity.rect.colliderect(tile.rect):
-                        if self.entity.vel.y > 0:
-                            self.entity.onGround = True
-                            self.entity.rect.bottom = tile.rect.top
-                            self.entity.vel.y = 0
-                            # reset jump on bottom
-                            if self.entity.traits is not None:
-                                if "JumpTrait" in self.entity.traits:
-                                    self.entity.traits["JumpTrait"].reset()
-                                if "bounceTrait" in self.entity.traits:
-                                    self.entity.traits["bounceTrait"].reset()
-                        if self.entity.vel.y < 0:
-                            self.entity.rect.top = tile.rect.bottom
-                            self.entity.vel.y = 0
+        base_x = base_index.x
+        for row_y, row in rows:
+            if row is None:
+                continue
+            for x_offset in range(0, 2):
+                tile_x = base_x + x_offset
+                if tile_x < 0 or tile_x >= len(row):
+                    continue
+                tile = row[tile_x]
+                if tile is None or tile.rect is None:
+                    continue
+                if not self.entity.rect.colliderect(tile.rect):
+                    continue
+                if self.entity.vel.y > 0:
+                    self.entity.onGround = True
+                    self.entity.rect.bottom = tile.rect.top
+                    self.entity.vel.y = 0
+                    if self.entity.traits is not None:
+                        if "JumpTrait" in self.entity.traits:
+                            self.entity.traits["JumpTrait"].reset()
+                        if "bounceTrait" in self.entity.traits:
+                            self.entity.traits["bounceTrait"].reset()
+                elif self.entity.vel.y < 0:
+                    self.levelObj.handle_tile_hit_from_below(tile_x, row_y, self.entity)
+                    self.entity.rect.top = tile.rect.bottom
+                    self.entity.vel.y = 0
 
     def rightLevelBorderReached(self):
         if self.entity.getPosIndexAsFloat().x > self.levelObj.levelLength - 1:

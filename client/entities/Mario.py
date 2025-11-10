@@ -67,6 +67,8 @@ class Mario(EntityBase):
         self.projectile_speed = 8
         self.is_dying = False
         self.death_timer = 0
+        self.hurt_timer = 0
+        self.prev_hp = self.hp
         self._set_power_state(self.powerUpState, initialize=True)
         self.float_messages = []
 
@@ -77,6 +79,8 @@ class Mario(EntityBase):
             self.traits["goTrait"].drawEntity()
             self.camera.move()
             return
+        if self.hurt_timer > 0:
+            self.hurt_timer -= 1
         if self.invincibilityFrames > 0:
             self.invincibilityFrames -= 1
         if self.fireCooldown > 0:
@@ -312,3 +316,19 @@ class Mario(EntityBase):
                 continue
             draw_x = msg["pos"][0] + self.camera.x - msg["text"].get_width() // 2
             self.screen.blit(msg["text"], (draw_x, msg["pos"][1]))
+
+    def trigger_hurt(self, *, play_sound: bool = True):
+        if self.is_dying:
+            return
+        if play_sound:
+            try:
+                self.sound.play_sfx(self.sound.bump)
+            except AttributeError:
+                pass
+        self.hurt_timer = max(self.hurt_timer, 24)
+        self.invincibilityFrames = max(self.invincibilityFrames, 40)
+
+    def on_hp_changed(self, old_hp: int, new_hp: int):
+        if new_hp < old_hp and new_hp > 0:
+            self.trigger_hurt()
+        self.prev_hp = new_hp

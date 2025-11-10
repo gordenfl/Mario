@@ -423,6 +423,11 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
             if drop_id is not None:
                 set_drop_direction(drop_id, direction)
                 pending_drop_collision_requests.discard(drop_id)
+        elif msg_type == "tile_break":
+            tile_x = message.get("x")
+            tile_y = message.get("y")
+            if isinstance(tile_x, int) and isinstance(tile_y, int):
+                level.break_tile(tile_x, tile_y, play_sound=True, record_event=False)
         elif msg_type == "game_over":
             return message
         return current_game_over
@@ -516,6 +521,8 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                 dashboard.set_player_health(mario.hp)
                 dashboard.update()
                 mario.update()
+                for tile_x, tile_y in level.consume_broken_tiles():
+                    network.send_tile_break(tile_x, tile_y)
                 for drop_id, entity in list(active_drop_entities.items()):
                     replacement = getattr(entity, "spawned_entity", None)
                     if replacement is not None:

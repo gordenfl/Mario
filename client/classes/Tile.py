@@ -2,9 +2,10 @@ import pygame
 
 
 class Tile:
-    def __init__(self, sprite, rect):
+    def __init__(self, sprite, rect, tile_type=None):
         self.sprite = sprite
         self.rect = rect
+        self.tile_type = tile_type
 
     def drawRect(self, screen):
         try:

@@ -38,6 +38,7 @@ class RemotePlayer:
         self.is_dying = False
         self.death_timer = 0
         self.prev_position = [0, 0]
+        self.hurt_timer = 0
         self.state = {
             "position": [0, 0],
             "velocity": [0, 0],
@@ -47,10 +48,14 @@ class RemotePlayer:
         }
 
     def update_from_state(self, state: dict):
+        old_hp = self.state.get("hp", 30)
         position = state.get("position", self.state["position"])
         self.state.update(state)
         self.rect.x = int(position[0])
         self.rect.y = int(position[1])
+        new_hp = self.state.get("hp", old_hp)
+        if new_hp < old_hp and new_hp > 0:
+            self.trigger_hurt()
         prev_pos = self.prev_position if hasattr(self, "prev_position") else [position[0], position[1]]
         dx = position[0] - prev_pos[0]
         dy = position[1] - prev_pos[1]
@@ -107,8 +112,18 @@ class RemotePlayer:
         image = self.current_animation.image
         if self.heading == -1:
             image = flip(image, True, False)
-        surface.blit(image, draw_rect)
+        hurt_active = self.hurt_timer > 0
+        timer_value = self.hurt_timer
+        if self.hurt_timer > 0:
+            self.hurt_timer -= 1
+        skip_frame = hurt_active and ((timer_value // 2) % 2 == 1)
+        if not skip_frame:
+            surface.blit(image, draw_rect)
         font = get_font(18)
-        label = font.render(self.username, True, (255, 255, 255))
+        label_color = (255, 200, 200) if hurt_active else (255, 255, 255)
+        label = font.render(self.username, True, label_color)
         label_rect = label.get_rect(midbottom=(draw_rect.centerx, draw_rect.y - 2))
         surface.blit(label, label_rect)
+
+    def trigger_hurt(self):
+        self.hurt_timer = max(self.hurt_timer, 30)

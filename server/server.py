@@ -49,6 +49,7 @@ class Room:
     room_id: str
     members: Dict[str, ClientSession] = field(default_factory=dict)
     active_drops: Dict[str, Dict] = field(default_factory=dict)
+    broken_tiles: set = field(default_factory=set)
 
     def is_full(self) -> bool:
         return len(self.members) >= 2
@@ -129,6 +130,8 @@ class GameServer:
             await self.handle_drop_collected(client, message)
         elif msg_type == "drop_collision":
             await self.handle_drop_collision(client, message)
+        elif msg_type == "tile_break":
+            await self.handle_tile_break(client, message)
         else:
             await self.send_error(client, "unknown_type", f"Unknown message type: {msg_type}")
 
@@ -198,6 +201,7 @@ class GameServer:
                     "players": [m.username for m in room.members.values()],
                 })
             return
+        room.broken_tiles.clear()
         spawn_slots = ["left", "right"]
         spawn_map = {}
         members_ordered = list(room.members.values())
@@ -367,6 +371,38 @@ class GameServer:
             drop_id[:6],
             side,
             drop["direction"],
+        )
+        for member in recipients:
+            await self.send(member, payload)
+
+    async def handle_tile_break(self, client: ClientSession, message: Dict):
+        if not client.room_id:
+            return
+        tile_x = message.get("x")
+        tile_y = message.get("y")
+        if not isinstance(tile_x, int) or not isinstance(tile_y, int):
+            return
+        async with self.lock:
+            room = self.rooms.get(client.room_id)
+            if not room:
+                return
+            key = (tile_x, tile_y)
+            if key in room.broken_tiles:
+                return
+            room.broken_tiles.add(key)
+            recipients = list(room.members.values())
+        payload = {
+            "type": "tile_break",
+            "x": tile_x,
+            "y": tile_y,
+            "username": client.username,
+        }
+        logging.info(
+            "[room %s] tile_break at (%d, %d) by %s",
+            client.room_id,
+            tile_x,
+            tile_y,
+            client.username,
         )
         for member in recipients:
             await self.send(member, payload)

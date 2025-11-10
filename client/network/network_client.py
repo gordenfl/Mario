@@ -132,6 +132,14 @@ class NetworkClient:
         }
         self.send_message(payload)
 
+    def send_tile_break(self, x: int, y: int):
+        payload = {
+            "type": "tile_break",
+            "x": int(x),
+            "y": int(y),
+        }
+        self.send_message(payload)
+
     # 非阻塞请求接口，配合轮询使用
     def request_room_list(self):
         self.send_message({"type": "list_rooms"})

@@ -10,6 +10,7 @@ from entities.Mushroom import RedMushroom
 from entities.Koopa import Koopa
 from entities.CoinBox import CoinBox
 from entities.RandomBox import RandomBox
+from entities.brick_debris import BrickDebrisEffect
 
 
 class Level:
@@ -21,6 +22,8 @@ class Level:
         self.level = None
         self.levelLength = 0
         self.entityList = []
+        self.effects = []
+        self.broken_tiles = []
 
     def loadLevel(self, levelname):
         with open("./levels/{}.json".format(levelname)) as jsonData:
@@ -55,13 +58,14 @@ class Level:
             layers.append(
                 (
                         [
-                            Tile(self.sprites.spriteCollection.get("sky"), None)
+                            Tile(self.sprites.spriteCollection.get("sky"), None, "sky")
                             for y in range(*data["level"]["layers"]["sky"]["y"])
                         ]
                         + [
                             Tile(
                                 self.sprites.spriteCollection.get("ground"),
                                 pygame.Rect(x * 32, (y - 1) * 32, 32, 32),
+                                "ground",
                             )
                             for y in range(*data["level"]["layers"]["ground"]["y"])
                         ]
@@ -78,27 +82,94 @@ class Level:
                 and 0 <= tile_x < len(self.level[tile_y])
             )
 
-        for x, y in data["level"]["objects"].get("bush", []):
-            self.addBushSprite(x, y)
-        for x, y in data["level"]["objects"].get("cloud", []):
-            self.addCloudSprite(x, y)
-        for x, y, z in data["level"]["objects"].get("pipe", []):
-            self.addPipeSprite(x, y, z)
-        for x, y in data["level"]["objects"].get("sky", []):
-            if in_bounds(x, y):
-                self.level[y][x] = Tile(self.sprites.spriteCollection.get("sky"), None)
         for x, y in data["level"]["objects"].get("ground", []):
             if in_bounds(x, y):
                 self.level[y][x] = Tile(
                     self.sprites.spriteCollection.get("ground"),
                     pygame.Rect(x * 32, y * 32, 32, 32),
+                    "ground",
                 )
         for x, y in data["level"]["objects"].get("bricks", []):
             if in_bounds(x, y):
                 self.level[y][x] = Tile(
                     self.sprites.spriteCollection.get("bricks"),
                     pygame.Rect(x * 32, y * 32, 32, 32),
+                    "bricks",
                 )
+        for x, y, z in data["level"]["objects"].get("pipe", []):
+            self.addPipeSprite(x, y, z)
+        for x, y in data["level"]["objects"].get("bush", []):
+            self.addBushSprite(x, y)
+        for x, y in data["level"]["objects"].get("cloud", []):
+            self.addCloudSprite(x, y)
+        for x, y in data["level"]["objects"].get("sky", []):
+            if not in_bounds(x, y):
+                continue
+            current = self.level[y][x]
+            if current and getattr(current, "tile_type", None) in {"pipe", "block", "coinBrick"}:
+                continue
+            self.level[y][x] = Tile(self.sprites.spriteCollection.get("sky"), None, "sky")
+
+    def get_tile(self, tile_x: int, tile_y: int):
+        if not self.level:
+            return None
+        if tile_y < 0 or tile_y >= len(self.level):
+            return None
+        row = self.level[tile_y]
+        if row is None or tile_x < 0 or tile_x >= len(row):
+            return None
+        return row[tile_x]
+
+    def break_tile(self, tile_x: int, tile_y: int, *, play_sound: bool = True, record_event: bool = True) -> bool:
+        tile = self.get_tile(tile_x, tile_y)
+        if not tile or getattr(tile, "tile_type", None) != "bricks":
+            return False
+        if play_sound:
+            try:
+                self.sound.play_sfx(self.sound.brick_bump)
+            except AttributeError:
+                pass
+        self.level[tile_y][tile_x] = Tile(self.sprites.spriteCollection.get("sky"), None, "sky")
+        self.spawn_brick_debris(tile_x, tile_y)
+        if record_event:
+            self.broken_tiles.append((tile_x, tile_y))
+        return True
+
+    def handle_tile_hit_from_below(self, tile_x: int, tile_y: int, entity) -> bool:
+        tile = self.get_tile(tile_x, tile_y)
+        if not tile:
+            return False
+        tile_type = getattr(tile, "tile_type", None)
+        if tile_type == "bricks":
+            power = getattr(entity, "powerUpState", 0)
+            if power >= 1:
+                return self.break_tile(tile_x, tile_y, play_sound=True, record_event=True)
+            try:
+                self.sound.play_sfx(self.sound.brick_bump)
+            except AttributeError:
+                pass
+        return False
+
+    def consume_broken_tiles(self):
+        if not self.broken_tiles:
+            return []
+        tiles = self.broken_tiles[:]
+        self.broken_tiles.clear()
+        return tiles
+
+    def spawn_brick_debris(self, tile_x: int, tile_y: int):
+        try:
+            effect = BrickDebrisEffect(self.sprites.spriteCollection, self.screen, tile_x, tile_y)
+        except Exception:
+            effect = None
+        if effect:
+            self.effects.append(effect)
+
+    def updateEffects(self, camera):
+        for effect in list(self.effects):
+            effect.update(camera)
+            if effect.done:
+                self.effects.remove(effect)
 
     def updateEntities(self, cam):
         for entity in self.entityList:
@@ -130,13 +201,17 @@ class Level:
                     x + camera.pos.x, y, self.screen
                 )
         self.updateEntities(camera)
+        self.updateEffects(camera)
 
     def addCloudSprite(self, x, y):
         try:
             for yOff in range(0, 2):
                 for xOff in range(0, 3):
                     self.level[y + yOff][x + xOff] = Tile(
-                        self.sprites.spriteCollection.get("cloud{}_{}".format(yOff + 1, xOff + 1)), None, )
+                        self.sprites.spriteCollection.get("cloud{}_{}".format(yOff + 1, xOff + 1)),
+                        None,
+                        "cloud",
+                    )
         except IndexError:
             return
 
@@ -146,38 +221,42 @@ class Level:
             self.level[y][x] = Tile(
                 self.sprites.spriteCollection.get("pipeL"),
                 pygame.Rect(x * 32, y * 32, 32, 32),
+                "pipe",
             )
             self.level[y][x + 1] = Tile(
                 self.sprites.spriteCollection.get("pipeR"),
                 pygame.Rect((x + 1) * 32, y * 32, 32, 32),
+                "pipe",
             )
             # add pipe body
             for i in range(1, length + 20):
                 self.level[y + i][x] = Tile(
                     self.sprites.spriteCollection.get("pipe2L"),
                     pygame.Rect(x * 32, (y + i) * 32, 32, 32),
+                    "pipe",
                 )
                 self.level[y + i][x + 1] = Tile(
                     self.sprites.spriteCollection.get("pipe2R"),
                     pygame.Rect((x + 1) * 32, (y + i) * 32, 32, 32),
+                    "pipe",
                 )
         except IndexError:
             return
 
     def addBushSprite(self, x, y):
         try:
-            self.level[y][x] = Tile(self.sprites.spriteCollection.get("bush_1"), None)
+            self.level[y][x] = Tile(self.sprites.spriteCollection.get("bush_1"), None, "bush")
             self.level[y][x + 1] = Tile(
-                self.sprites.spriteCollection.get("bush_2"), None
+                self.sprites.spriteCollection.get("bush_2"), None, "bush"
             )
             self.level[y][x + 2] = Tile(
-                self.sprites.spriteCollection.get("bush_3"), None
+                self.sprites.spriteCollection.get("bush_3"), None, "bush"
             )
         except IndexError:
             return
 
     def addCoinBox(self, x, y):
-        self.level[y][x] = Tile(None, pygame.Rect(x * 32, y * 32 - 1, 32, 32))
+        self.level[y][x] = Tile(None, pygame.Rect(x * 32, y * 32 - 1, 32, 32), "block")
         self.entityList.append(
             CoinBox(
                 self.screen,
@@ -190,7 +269,7 @@ class Level:
         )
 
     def addRandomBox(self, x, y, item):
-        self.level[y][x] = Tile(None, pygame.Rect(x * 32, y * 32 - 1, 32, 32))
+        self.level[y][x] = Tile(None, pygame.Rect(x * 32, y * 32 - 1, 32, 32), "block")
         self.entityList.append(
             RandomBox(
                 self.screen,
@@ -208,7 +287,7 @@ class Level:
         self.entityList.append(Coin(self.screen, self.sprites.spriteCollection, x, y))
 
     def addCoinBrick(self, x, y):
-        self.level[y][x] = Tile(None, pygame.Rect(x * 32, y * 32 - 1, 32, 32))
+        self.level[y][x] = Tile(None, pygame.Rect(x * 32, y * 32 - 1, 32, 32), "coinBrick")
         self.entityList.append(
             CoinBrick(
                 self.screen,
