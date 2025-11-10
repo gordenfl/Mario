@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
-from . import udp_protocol
+import udp_protocol
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
