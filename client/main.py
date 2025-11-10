@@ -367,6 +367,14 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
     mario.camera.move()
     dashboard.set_player_health(mario.hp, mario.hp)
     remote_players = build_remote_players(room_ready_msg, username, level)
+    udp_info = room_ready_msg.get("udp")
+    if isinstance(udp_info, dict):
+        network.enable_udp(
+            token=udp_info.get("token", ""),
+            client_id=udp_info.get("client_id", 0),
+            port=udp_info.get("port"),
+            host=udp_info.get("host"),
+        )
     projectiles: dict[str, Fireball] = {}
     fall_reported = False
     fall_threshold = 440
@@ -513,6 +521,8 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     network.close()
                     pygame.quit()
                     sys.exit(0)
+
+            network.poll_udp()
 
             if mario.pause:
                 mario.pauseObj.update()

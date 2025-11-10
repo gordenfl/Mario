@@ -1,9 +1,13 @@
 import json
+import logging
 import queue
 import socket
 import threading
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+
+from .protocol import MSG_HELLO_ACK
+from .udp_client import UdpClient
 
 
 NEWLINE = "\n"
@@ -36,6 +40,8 @@ class NetworkClient:
         self.username: Optional[str] = None
         self.room_id: Optional[str] = None
         self.running = False
+        self._udp_client: Optional[UdpClient] = None
+        self._udp_enabled = False
 
     def connect(self, username: str) -> Dict:
         """Connect to the server and perform login. Returns login response."""
@@ -65,6 +71,10 @@ class NetworkClient:
                 pass
         if self._writer_thread and self._writer_thread.is_alive():
             self._writer_thread.join(timeout=1.0)
+        if self._udp_client:
+            self._udp_client.close()
+            self._udp_client = None
+        self._udp_enabled = False
 
     def list_rooms(self) -> List[Dict]:
         self.send_message({"type": "list_rooms"})
@@ -139,6 +149,43 @@ class NetworkClient:
             "y": int(y),
         }
         self.send_message(payload)
+
+    # -- UDP support -----------------------------------------------------
+
+    def enable_udp(self, token: str, client_id: int, port: Optional[int] = None, host: Optional[str] = None) -> bool:
+        """Initialise the UDP transport for high-frequency messages."""
+        token = (token or "").strip()
+        if not token:
+            logging.debug("UDP token missing; UDP channel not enabled")
+            return False
+        if host in (None, "", "0.0.0.0"):
+            host = self.host
+        if port is None:
+            port = self.port
+        if self._udp_client is None:
+            self._udp_client = UdpClient()
+        try:
+            self._udp_client.open(token, client_id, host, port)
+            self._udp_enabled = True
+            logging.debug("UDP channel enabled: host=%s port=%s client_id=%s", host, port, client_id)
+            return True
+        except OSError as exc:
+            logging.warning("Failed to open UDP channel: %s", exc)
+            self._udp_enabled = False
+            return False
+
+    def poll_udp(self) -> List[Tuple[int, dict]]:
+        """Poll the UDP socket and return decoded events."""
+        if not self._udp_client or not self._udp_enabled:
+            return []
+        events = self._udp_client.poll()
+        for msg_type, event in events:
+            if msg_type == MSG_HELLO_ACK:
+                logging.debug("Received UDP handshake acknowledgment from %s", event.get("addr"))
+        return events
+
+    def udp_connected(self) -> bool:
+        return bool(self._udp_client and self._udp_client.connected)
 
     # 非阻塞请求接口，配合轮询使用
     def request_room_list(self):

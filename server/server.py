@@ -2,10 +2,13 @@ import asyncio
 import json
 import logging
 import os
+import random
+import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, Optional
-import random
+from typing import Dict, Optional, Tuple
+
+from . import udp_protocol
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
@@ -35,6 +38,7 @@ class ClientSession:
     username: Optional[str] = None
     room_id: Optional[str] = None
     hp: int = 30
+    udp_id: Optional[int] = None
 
     @property
     def peername(self) -> str:
@@ -52,6 +56,7 @@ class Room:
     broken_tiles: set = field(default_factory=set)
     game_over: bool = False
     result: Optional[Dict[str, str]] = None
+    udp_clients: Dict[str, "UdpClientInfo"] = field(default_factory=dict)
 
     def is_full(self) -> bool:
         return len(self.members) >= 2
@@ -72,21 +77,67 @@ class Room:
                 yield member
 
 
+@dataclass
+class UdpClientInfo:
+    token: str
+    client_index: int
+    address: Optional[Tuple[str, int]] = None
+    last_seq: int = -1
+    last_timestamp: int = 0
+    next_server_seq: int = 0
+
+
 class GameServer:
     def __init__(self, host: str = "0.0.0.0", port: int = 8765):
         self.host = host
         self.port = port
+        self.udp_port = port  # reuse same numeric port for UDP
         self.clients: Dict[str, ClientSession] = {}
         self.rooms: Dict[str, Room] = {}
         self.lock = asyncio.Lock()
         self.room_drop_tasks: Dict[str, asyncio.Task] = {}
+        self.pending_udp_tokens: Dict[str, Tuple[str, str, int]] = {}
+        self.udp_transport: Optional[asyncio.transports.DatagramTransport] = None
+        self._udp_protocol = None
 
     async def start(self):
+        loop = asyncio.get_running_loop()
         server = await asyncio.start_server(self.handle_client, self.host, self.port)
-        addrs = ", ".join(str(sock.getsockname()) for sock in server.sockets)
-        logging.info("Server listening on %s", addrs)
-        async with server:
-            await server.serve_forever()
+        try:
+            udp_transport, udp_protocol = await loop.create_datagram_endpoint(
+                lambda: self._UdpProtocol(self, loop),
+                local_addr=(self.host, self.udp_port),
+            )
+            self.udp_transport = udp_transport
+            self._udp_protocol = udp_protocol
+            addrs = ", ".join(str(sock.getsockname()) for sock in server.sockets)
+            logging.info(
+                "Server listening on %s (UDP port %s)",
+                addrs,
+                self.udp_port,
+            )
+            async with server:
+                await server.serve_forever()
+        finally:
+            if self.udp_transport:
+                self.udp_transport.close()
+                self.udp_transport = None
+
+    class _UdpProtocol(asyncio.DatagramProtocol):
+        def __init__(self, server: "GameServer", loop: asyncio.AbstractEventLoop):
+            self.server = server
+            self.loop = loop
+
+        def datagram_received(self, data: bytes, addr):
+            self.loop.create_task(self.server.handle_udp_datagram(data, addr))
+
+        def error_received(self, exc):
+            logging.warning("UDP error: %s", exc)
+
+        def connection_lost(self, exc):
+            if exc:
+                logging.warning("UDP connection lost: %s", exc)
+
 
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         client = ClientSession(reader, writer)
@@ -136,6 +187,66 @@ class GameServer:
             await self.handle_tile_break(client, message)
         else:
             await self.send_error(client, "unknown_type", f"Unknown message type: {msg_type}")
+
+    async def handle_udp_datagram(self, data: bytes, addr):
+        try:
+            msg_type, client_index, seq, timestamp, payload = udp_protocol.unpack_message(data)
+        except ValueError:
+            logging.debug("Received malformed UDP packet from %s", addr)
+            return
+        if msg_type == udp_protocol.MSG_HELLO:
+            token = payload.decode("utf-8", "ignore")
+            await self._handle_udp_hello(client_index, token, addr)
+        else:
+            logging.debug("Unhandled UDP message type %s from %s (seq=%s)", msg_type, addr, seq)
+
+    async def _handle_udp_hello(self, client_index: int, token: str, addr):
+        token = (token or "").strip()
+        async with self.lock:
+            entry = self.pending_udp_tokens.get(token)
+            if not entry:
+                logging.debug("UDP hello with unknown token '%s' from %s", token, addr)
+                return
+            room_id, client_session_id, expected_index = entry
+            if client_index != expected_index:
+                logging.debug(
+                    "UDP hello index mismatch token=%s expected=%s got=%s",
+                    token,
+                    expected_index,
+                    client_index,
+                )
+                return
+            room = self.rooms.get(room_id)
+            if not room:
+                logging.debug("UDP hello for non-existent room %s", room_id)
+                return
+            info = room.udp_clients.get(client_session_id)
+            client = room.members.get(client_session_id)
+            if not info or info.token != token:
+                logging.debug("UDP hello token mismatch for client %s", client_session_id)
+                return
+            info.address = addr
+            info.last_seq = -1
+            info.last_timestamp = 0
+            client_name = client.username if client else "<unknown>"
+        logging.info("UDP handshake success for %s (%s)", client_name, addr)
+        self._send_udp_ack(info)
+
+    def _send_udp_ack(self, info: UdpClientInfo):
+        if not self.udp_transport or not info.address:
+            return
+        packet = udp_protocol.pack_message(
+            udp_protocol.MSG_HELLO_ACK,
+            info.client_index,
+            info.next_server_seq & 0xFFFF,
+            udp_protocol.current_millis(),
+            info.token.encode("utf-8"),
+        )
+        info.next_server_seq = (info.next_server_seq + 1) & 0xFFFF
+        try:
+            self.udp_transport.sendto(packet, info.address)
+        except OSError as exc:
+            logging.warning("Failed to send UDP ACK to %s: %s", info.address, exc)
 
     async def handle_login(self, client: ClientSession, message: Dict):
         username = message.get("username")
@@ -203,6 +314,9 @@ class GameServer:
                     "players": [m.username for m in room.members.values()],
                 })
             return
+        for info in room.udp_clients.values():
+            self.pending_udp_tokens.pop(info.token, None)
+        room.udp_clients.clear()
         room.broken_tiles.clear()
         room.game_over = False
         room.result = None
@@ -213,20 +327,35 @@ class GameServer:
         members_ordered = list(room.members.values())
         for member, slot in zip(members_ordered, spawn_slots):
             spawn_map[member.id] = slot
+        udp_host = None if self.host in ("0.0.0.0", "::", "") else self.host
+        for index, member in enumerate(members_ordered):
+            member.udp_id = index
+            token = uuid.uuid4().hex
+            info = UdpClientInfo(token=token, client_index=index)
+            room.udp_clients[member.id] = info
+            self.pending_udp_tokens[token] = (room.room_id, member.id, index)
         players = [
             {
                 "username": member.username,
                 "hp": member.hp,
                 "spawn": spawn_map.get(member.id, "left"),
+                "client_id": member.udp_id,
             }
             for member in members_ordered
         ]
         for member in members_ordered:
+            udp_info = room.udp_clients.get(member.id)
             await self.send(member, {
                 "type": "room_ready",
                 "room_id": room.room_id,
                 "players": players,
                 "your_spawn": spawn_map.get(member.id, "left"),
+                "udp": {
+                    "port": self.udp_port,
+                    "token": udp_info.token if udp_info else "",
+                    "client_id": udp_info.client_index if udp_info else 0,
+                    "host": udp_host,
+                },
             })
 
     async def handle_leave_room(self, client: ClientSession):
@@ -237,9 +366,13 @@ class GameServer:
             if room:
                 room.remove_member(client.id)
                 should_delete = room.is_empty()
+                info = room.udp_clients.pop(client.id, None)
+                if info:
+                    self.pending_udp_tokens.pop(info.token, None)
             else:
                 should_delete = False
             client.room_id = None
+            client.udp_id = None
         if room and room.room_id in self.room_drop_tasks and room.is_empty():
             task = self.room_drop_tasks.pop(room.room_id)
             task.cancel()
@@ -264,6 +397,8 @@ class GameServer:
                 task = self.room_drop_tasks.pop(room.room_id, None)
                 if task:
                     task.cancel()
+                for info in room.udp_clients.values():
+                    self.pending_udp_tokens.pop(info.token, None)
         logging.info("%s left room %s", client.username, room.room_id if room else "<unknown>")
 
     async def handle_state_update(self, client: ClientSession, message: Dict):
