@@ -1,5 +1,6 @@
 import random
 import sys
+import time
 import uuid
 
 import pygame
@@ -14,6 +15,7 @@ from entities.sky_drop import SkyDrop, SkyMushroom
 from typing import Optional
 from entities.remote_player import RemotePlayer
 from network.network_client import NetworkClient, NetworkError
+from network.protocol import MSG_PLAYER_STATE
 from ui.widgets import Button, TextInput, get_font
 
 
@@ -316,10 +318,14 @@ def compute_spawn_position(spawn: str, level: Level) -> tuple[int, int]:
     return spawn_x, base_y
 
 
-def build_remote_players(room_msg: dict, local_username: str, level: Level) -> dict:
-    remote = {}
+def build_remote_players(room_msg: dict, local_username: str, level: Level):
+    remote: dict[str, RemotePlayer] = {}
+    udp_mapping: dict[int, str] = {}
     for player in room_msg.get("players", []):
         username = player.get("username")
+        client_id = player.get("client_id")
+        if isinstance(client_id, int) and username:
+            udp_mapping[client_id] = username
         if username and username != local_username:
             spawn = player.get("spawn", "right")
             rp = RemotePlayer(username)
@@ -330,7 +336,7 @@ def build_remote_players(room_msg: dict, local_username: str, level: Level) -> d
             rp.prev_position = [spawn_x, spawn_y]
             rp.visible = True
             remote[username] = rp
-    return remote
+    return remote, udp_mapping
 
 
 def collect_local_state(mario: Mario, dashboard: Dashboard) -> dict:
@@ -344,6 +350,28 @@ def collect_local_state(mario: Mario, dashboard: Dashboard) -> dict:
         "score": dashboard.points,
         "dying": getattr(mario, "is_dying", False),
         "death_timer": getattr(mario, "death_timer", 0),
+    }
+
+
+def collect_udp_state(mario: Mario) -> dict:
+    flags = 0
+    if getattr(mario, "onGround", False):
+        flags |= 0b0001
+    if getattr(mario, "inJump", False):
+        flags |= 0b0010
+    if getattr(mario, "is_dying", False):
+        flags |= 0b0100
+    heading = 0
+    go_trait = getattr(mario, "traits", {}).get("goTrait") if hasattr(mario, "traits") else None
+    if go_trait:
+        heading = getattr(go_trait, "heading", heading)
+    return {
+        "x": mario.rect.x,
+        "y": mario.rect.y,
+        "vx": getattr(mario.vel, "x", 0.0),
+        "vy": getattr(mario.vel, "y", 0.0),
+        "flags": flags,
+        "heading": heading,
     }
 
 
@@ -366,7 +394,15 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
     mario.camera.snap_to_entity()
     mario.camera.move()
     dashboard.set_player_health(mario.hp, mario.hp)
-    remote_players = build_remote_players(room_ready_msg, username, level)
+    remote_players, udp_id_map = build_remote_players(room_ready_msg, username, level)
+    players_info = room_ready_msg.get("players", [])
+    local_udp_id = None
+    for player in players_info:
+        if player.get("username") == username:
+            local_udp_id = player.get("client_id")
+            if isinstance(local_udp_id, int):
+                udp_id_map[local_udp_id] = username
+            break
     udp_info = room_ready_msg.get("udp")
     if isinstance(udp_info, dict):
         network.enable_udp(
@@ -375,6 +411,10 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
             port=udp_info.get("port"),
             host=udp_info.get("host"),
         )
+        if local_udp_id is None:
+            client_id = udp_info.get("client_id")
+            if isinstance(client_id, int):
+                local_udp_id = client_id
     projectiles: dict[str, Fireball] = {}
     fall_reported = False
     fall_threshold = 440
@@ -384,6 +424,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
     active_drop_entities = {}
     reported_drop_ids = set()
     pending_drop_collision_requests = set()
+    last_tcp_state_sync = 0.0
 
     def handle_game_message(message, current_game_over):
         msg_type = message.get("type")
@@ -436,6 +477,27 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
             tile_y = message.get("y")
             if isinstance(tile_x, int) and isinstance(tile_y, int):
                 level.break_tile(tile_x, tile_y, play_sound=True, record_event=False)
+        elif msg_type == "state_snapshot":
+            for player in message.get("players", []):
+                username_msg = player.get("username")
+                if not username_msg or username_msg == username:
+                    continue
+                remote = remote_players.get(username_msg)
+                if not remote:
+                    continue
+                client_id = player.get("client_id")
+                if isinstance(client_id, int):
+                    udp_id_map[client_id] = username_msg
+                snapshot_state = {
+                    "position": [player.get("x", remote.rect.x), player.get("y", remote.rect.y)],
+                    "velocity": [player.get("vx", 0.0), player.get("vy", 0.0)],
+                    "flags": player.get("flags", 0),
+                    "heading": player.get("heading", remote.heading),
+                    "timestamp": player.get("timestamp", message.get("timestamp")),
+                    "dying": player.get("flags", 0) & 0b0100,
+                }
+                remote.state["hp"] = player.get("hp", remote.state.get("hp", 30))
+                remote.apply_snapshot(snapshot_state)
         elif msg_type == "game_over":
             return message
         return current_game_over
@@ -522,7 +584,22 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     pygame.quit()
                     sys.exit(0)
 
-            network.poll_udp()
+            udp_events = network.poll_udp()
+            for msg_type, event in udp_events:
+                if msg_type == MSG_PLAYER_STATE:
+                    sender_id = event.get("client_id")
+                    if sender_id is None or sender_id == local_udp_id:
+                        continue
+                    username_msg = udp_id_map.get(sender_id)
+                    if not username_msg:
+                        continue
+                    remote = remote_players.get(username_msg)
+                    if not remote:
+                        continue
+                    player_state = event.get("player_state")
+                    if player_state is None:
+                        continue
+                    remote.apply_udp_state(player_state, event.get("timestamp"))
 
             if mario.pause:
                 mario.pauseObj.update()
@@ -531,6 +608,8 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                 dashboard.set_player_health(mario.hp)
                 dashboard.update()
                 mario.update()
+                udp_state_payload = collect_udp_state(mario)
+                network.send_udp_player_state(udp_state_payload)
                 for tile_x, tile_y in level.consume_broken_tiles():
                     network.send_tile_break(tile_x, tile_y)
                 for drop_id, entity in list(active_drop_entities.items()):
@@ -619,7 +698,10 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                 for bullet in projectiles.values():
                     bullet.draw(screen, camera_world_x, camera_world_y)
 
-                network.send_state(collect_local_state(mario, dashboard))
+                now_monotonic = time.monotonic()
+                if now_monotonic - last_tcp_state_sync > 0.5:
+                    network.send_state(collect_local_state(mario, dashboard))
+                    last_tcp_state_sync = now_monotonic
                 if not fall_reported and not mario.is_dying and mario.rect.bottom > fall_threshold:
                     fall_reported = True
                     print(f"[client] {username} fell off the map, reporting to server")

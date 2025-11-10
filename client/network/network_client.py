@@ -6,7 +6,12 @@ import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
-from .protocol import MSG_HELLO_ACK
+from .protocol import (
+    MSG_HELLO_ACK,
+    MSG_PLAYER_STATE,
+    pack_player_state,
+    unpack_player_state,
+)
 from .udp_client import UdpClient
 
 
@@ -42,6 +47,8 @@ class NetworkClient:
         self.running = False
         self._udp_client: Optional[UdpClient] = None
         self._udp_enabled = False
+        self._udp_state_interval = 1.0 / 60.0
+        self._last_udp_state_sent = 0.0
 
     def connect(self, username: str) -> Dict:
         """Connect to the server and perform login. Returns login response."""
@@ -167,6 +174,7 @@ class NetworkClient:
         try:
             self._udp_client.open(token, client_id, host, port)
             self._udp_enabled = True
+            self._last_udp_state_sent = 0.0
             logging.debug("UDP channel enabled: host=%s port=%s client_id=%s", host, port, client_id)
             return True
         except OSError as exc:
@@ -182,10 +190,36 @@ class NetworkClient:
         for msg_type, event in events:
             if msg_type == MSG_HELLO_ACK:
                 logging.debug("Received UDP handshake acknowledgment from %s", event.get("addr"))
+            elif msg_type == MSG_PLAYER_STATE:
+                try:
+                    event["player_state"] = unpack_player_state(event.get("payload", b""))
+                except ValueError:
+                    logging.debug("Dropping malformed player state payload from %s", event.get("addr"))
+                    event["player_state"] = None
         return events
 
     def udp_connected(self) -> bool:
         return bool(self._udp_client and self._udp_client.connected)
+
+    def send_udp_player_state(self, state: Dict[str, float]) -> bool:
+        """Send the player's current state over UDP."""
+        if not self._udp_client or not self._udp_enabled:
+            return False
+        now = time.monotonic()
+        if now - self._last_udp_state_sent < self._udp_state_interval:
+            return False
+        payload = pack_player_state(
+            state.get("x", 0.0),
+            state.get("y", 0.0),
+            state.get("vx", 0.0),
+            state.get("vy", 0.0),
+            int(state.get("flags", 0)),
+            int(state.get("heading", 0)),
+        )
+        if self._udp_client.send(MSG_PLAYER_STATE, payload):
+            self._last_udp_state_sent = now
+            return True
+        return False
 
     # 非阻塞请求接口，配合轮询使用
     def request_room_list(self):

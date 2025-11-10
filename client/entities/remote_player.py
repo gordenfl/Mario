@@ -1,5 +1,6 @@
 import pygame
 from pygame.transform import flip
+from typing import Optional
 
 from classes.Animation import Animation
 from classes.Sprites import Sprites
@@ -39,6 +40,7 @@ class RemotePlayer:
         self.death_timer = 0
         self.prev_position = [0, 0]
         self.hurt_timer = 0
+        self.last_udp_timestamp = 0
         self.state = {
             "position": [0, 0],
             "velocity": [0, 0],
@@ -51,14 +53,9 @@ class RemotePlayer:
         old_hp = self.state.get("hp", 30)
         position = state.get("position", self.state["position"])
         self.state.update(state)
-        self.rect.x = int(position[0])
-        self.rect.y = int(position[1])
         new_hp = self.state.get("hp", old_hp)
         if new_hp < old_hp and new_hp > 0:
             self.trigger_hurt()
-        prev_pos = self.prev_position if hasattr(self, "prev_position") else [position[0], position[1]]
-        dx = position[0] - prev_pos[0]
-        dy = position[1] - prev_pos[1]
         dying = state.get("dying", False)
         death_timer = state.get("death_timer", 0)
         if dying:
@@ -86,22 +83,17 @@ class RemotePlayer:
         else:
             self.current_animation.inAir()
 
-        if not self.is_dying:
-            if dx > 0.5:
-                self.heading = 1
-                self.current_animation.update()
-            elif dx < -0.5:
-                self.heading = -1
-                self.current_animation.update()
-            else:
-                self.current_animation.idle()
-            if abs(dy) > 1.0:
-                self.current_animation.inAir()
-        else:
-            self.current_animation.inAir()
-
-        self.prev_position = list(position)
-        self.visible = True
+        velocity = state.get("velocity", self.state.get("velocity", [0, 0]))
+        flags = state.get("flags")
+        heading = state.get("heading")
+        on_ground = bool(flags & 0b0001) if isinstance(flags, int) else None
+        if isinstance(flags, int):
+            self.state["flags"] = flags
+        vx = velocity[0] if isinstance(velocity, (list, tuple)) and len(velocity) > 0 else 0.0
+        vy = velocity[1] if isinstance(velocity, (list, tuple)) and len(velocity) > 1 else 0.0
+        self._apply_motion(position[0], position[1], vx, vy, heading, on_ground, state.get("timestamp"))
+        self.state["velocity"] = [vx, vy]
+        self.state["position"] = [position[0], position[1]]
 
     def draw(self, surface: pygame.Surface, camera_world_x: float, camera_world_y: float):
         if not self.visible:
@@ -127,3 +119,65 @@ class RemotePlayer:
 
     def trigger_hurt(self):
         self.hurt_timer = max(self.hurt_timer, 30)
+
+    def apply_udp_state(self, state: dict, timestamp: Optional[int] = None):
+        x = state.get("x", self.rect.x)
+        y = state.get("y", self.rect.y)
+        vx = state.get("vx", 0.0)
+        vy = state.get("vy", 0.0)
+        flags = state.get("flags", 0)
+        heading = state.get("heading", self.heading)
+        self.state["flags"] = flags
+        on_ground = bool(flags & 0b0001)
+        self._apply_motion(x, y, vx, vy, heading, on_ground, timestamp)
+
+    def apply_snapshot(self, snapshot: dict):
+        position = snapshot.get("position", [self.rect.x, self.rect.y])
+        velocity = snapshot.get("velocity", [0.0, 0.0])
+        heading = snapshot.get("heading", self.heading)
+        flags = snapshot.get("flags")
+        on_ground = bool(flags & 0b0001) if isinstance(flags, int) else None
+        if isinstance(flags, int):
+            self.state["flags"] = flags
+        self._apply_motion(
+            position[0],
+            position[1],
+            velocity[0] if len(velocity) > 0 else 0.0,
+            velocity[1] if len(velocity) > 1 else 0.0,
+            heading,
+            on_ground,
+            snapshot.get("timestamp"),
+        )
+
+    def _apply_motion(self, x: float, y: float, vx: float, vy: float, heading: Optional[int], on_ground: Optional[bool], timestamp: Optional[int]):
+        prev_pos = self.prev_position if hasattr(self, "prev_position") else [self.rect.x, self.rect.y]
+        dx = x - prev_pos[0]
+        dy = y - prev_pos[1]
+        if heading is None:
+            if dx > 0.5:
+                heading = 1
+            elif dx < -0.5:
+                heading = -1
+            else:
+                heading = self.heading
+        self.heading = heading
+        if on_ground is None:
+            on_ground = abs(vy) < 0.1
+        if self.is_dying:
+            self.current_animation.inAir()
+        else:
+            if not on_ground:
+                self.current_animation.inAir()
+            else:
+                if abs(dx) > 0.5:
+                    self.current_animation.update()
+                else:
+                    self.current_animation.idle()
+        self.rect.x = int(x)
+        self.rect.y = int(y)
+        self.prev_position = [x, y]
+        self.visible = True
+        if timestamp is not None:
+            self.last_udp_timestamp = timestamp
+        self.state["position"] = [x, y]
+        self.state["velocity"] = [vx, vy]

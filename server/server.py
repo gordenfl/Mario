@@ -57,6 +57,8 @@ class Room:
     game_over: bool = False
     result: Optional[Dict[str, str]] = None
     udp_clients: Dict[str, "UdpClientInfo"] = field(default_factory=dict)
+    udp_client_index_map: Dict[int, str] = field(default_factory=dict)
+    latest_states: Dict[str, dict] = field(default_factory=dict)
 
     def is_full(self) -> bool:
         return len(self.members) >= 2
@@ -99,6 +101,9 @@ class GameServer:
         self.pending_udp_tokens: Dict[str, Tuple[str, str, int]] = {}
         self.udp_transport: Optional[asyncio.transports.DatagramTransport] = None
         self._udp_protocol = None
+        self.udp_addr_map: Dict[Tuple[str, int], Tuple[str, str]] = {}
+        self.udp_index_map: Dict[Tuple[str, int], str] = {}
+        self.room_snapshot_tasks: Dict[str, asyncio.Task] = {}
 
     async def start(self):
         loop = asyncio.get_running_loop()
@@ -197,6 +202,8 @@ class GameServer:
         if msg_type == udp_protocol.MSG_HELLO:
             token = payload.decode("utf-8", "ignore")
             await self._handle_udp_hello(client_index, token, addr)
+        elif msg_type == udp_protocol.MSG_PLAYER_STATE:
+            await self._handle_udp_player_state(addr, client_index, seq, timestamp, payload)
         else:
             logging.debug("Unhandled UDP message type %s from %s (seq=%s)", msg_type, addr, seq)
 
@@ -225,9 +232,14 @@ class GameServer:
             if not info or info.token != token:
                 logging.debug("UDP hello token mismatch for client %s", client_session_id)
                 return
+            if info.address:
+                self.udp_addr_map.pop(info.address, None)
             info.address = addr
             info.last_seq = -1
             info.last_timestamp = 0
+            self.udp_addr_map[addr] = (room.room_id, client_session_id)
+            self.udp_index_map[(room.room_id, info.client_index)] = client_session_id
+            room.latest_states.pop(client_session_id, None)
             client_name = client.username if client else "<unknown>"
         logging.info("UDP handshake success for %s (%s)", client_name, addr)
         self._send_udp_ack(info)
@@ -247,6 +259,66 @@ class GameServer:
             self.udp_transport.sendto(packet, info.address)
         except OSError as exc:
             logging.warning("Failed to send UDP ACK to %s: %s", info.address, exc)
+
+    async def _handle_udp_player_state(self, addr, client_index: int, seq: int, timestamp: int, payload: bytes):
+        async with self.lock:
+            mapping = self.udp_addr_map.get(addr)
+            if not mapping:
+                logging.debug("UDP state from unknown address %s", addr)
+                return
+            room_id, client_session_id = mapping
+            room = self.rooms.get(room_id)
+            if not room:
+                self.udp_addr_map.pop(addr, None)
+                return
+            info = room.udp_clients.get(client_session_id)
+            if not info:
+                return
+            if info.client_index != client_index:
+                logging.debug(
+                    "UDP state index mismatch for %s: expected %s got %s",
+                    client_session_id,
+                    info.client_index,
+                    client_index,
+                )
+                return
+            if info.last_seq != -1:
+                delta = (seq - info.last_seq) & 0xFFFF
+                if delta == 0 or delta > 0x8000:
+                    return
+            info.last_seq = seq
+            info.last_timestamp = timestamp
+            try:
+                state = udp_protocol.unpack_player_state(payload)
+            except ValueError:
+                logging.debug("Malformed player state payload from %s", addr)
+                return
+            state["timestamp"] = timestamp
+            room.latest_states[client_session_id] = state
+            if not self.udp_transport:
+                return
+            recipients = [
+                other_info.address
+                for session_id, other_info in room.udp_clients.items()
+                if session_id != client_session_id and other_info.address
+            ]
+            sender_index = info.client_index
+            server_seq = info.next_server_seq & 0xFFFF
+            info.next_server_seq = (info.next_server_seq + 1) & 0xFFFF
+        if not recipients or not self.udp_transport:
+            return
+        packet = udp_protocol.pack_message(
+            udp_protocol.MSG_PLAYER_STATE,
+            sender_index,
+            server_seq,
+            timestamp,
+            payload,
+        )
+        for target_addr in recipients:
+            try:
+                self.udp_transport.sendto(packet, target_addr)
+            except OSError as exc:
+                logging.debug("Failed to forward UDP state to %s: %s", target_addr, exc)
 
     async def handle_login(self, client: ClientSession, message: Dict):
         username = message.get("username")
@@ -316,7 +388,12 @@ class GameServer:
             return
         for info in room.udp_clients.values():
             self.pending_udp_tokens.pop(info.token, None)
+            if info.address:
+                self.udp_addr_map.pop(info.address, None)
+            self.udp_index_map.pop((room.room_id, info.client_index), None)
         room.udp_clients.clear()
+        room.udp_client_index_map.clear()
+        room.latest_states.clear()
         room.broken_tiles.clear()
         room.game_over = False
         room.result = None
@@ -333,6 +410,7 @@ class GameServer:
             token = uuid.uuid4().hex
             info = UdpClientInfo(token=token, client_index=index)
             room.udp_clients[member.id] = info
+            room.udp_client_index_map[index] = member.id
             self.pending_udp_tokens[token] = (room.room_id, member.id, index)
         players = [
             {
@@ -357,6 +435,10 @@ class GameServer:
                     "host": udp_host,
                 },
             })
+        if room.room_id in self.room_snapshot_tasks:
+            task = self.room_snapshot_tasks.pop(room.room_id)
+            task.cancel()
+        self.room_snapshot_tasks[room.room_id] = asyncio.create_task(self._room_snapshot_loop(room.room_id))
 
     async def handle_leave_room(self, client: ClientSession):
         if not client.room_id:
@@ -369,6 +451,11 @@ class GameServer:
                 info = room.udp_clients.pop(client.id, None)
                 if info:
                     self.pending_udp_tokens.pop(info.token, None)
+                    if info.address:
+                        self.udp_addr_map.pop(info.address, None)
+                    self.udp_index_map.pop((room.room_id, info.client_index), None)
+                    room.latest_states.pop(client.id, None)
+                    room.udp_client_index_map.pop(info.client_index, None)
             else:
                 should_delete = False
             client.room_id = None
@@ -377,6 +464,10 @@ class GameServer:
             task = self.room_drop_tasks.pop(room.room_id)
             task.cancel()
             room.active_drops.clear()
+        if room and room.is_empty():
+            snapshot_task = self.room_snapshot_tasks.pop(room.room_id, None)
+            if snapshot_task:
+                snapshot_task.cancel()
         if room and not should_delete:
             if room.game_over:
                 logging.info("%s left room %s after game over", client.username, room.room_id)
@@ -397,8 +488,17 @@ class GameServer:
                 task = self.room_drop_tasks.pop(room.room_id, None)
                 if task:
                     task.cancel()
+                snapshot_task = self.room_snapshot_tasks.pop(room.room_id, None)
+                if snapshot_task:
+                    snapshot_task.cancel()
                 for info in room.udp_clients.values():
                     self.pending_udp_tokens.pop(info.token, None)
+                    if info.address:
+                        self.udp_addr_map.pop(info.address, None)
+                    self.udp_index_map.pop((room.room_id, info.client_index), None)
+                room.udp_clients.clear()
+                room.latest_states.clear()
+                room.udp_client_index_map.clear()
         logging.info("%s left room %s", client.username, room.room_id if room else "<unknown>")
 
     async def handle_state_update(self, client: ClientSession, message: Dict):
@@ -606,6 +706,48 @@ class GameServer:
                 room = self.rooms.get(room_id)
                 if room:
                     room.active_drops.clear()
+
+    async def _room_snapshot_loop(self, room_id: str):
+        try:
+            while True:
+                await asyncio.sleep(0.25)
+                async with self.lock:
+                    room = self.rooms.get(room_id)
+                    if not room or room.is_empty() or room.game_over:
+                        break
+                    snapshot_players = []
+                    for member_id, member in room.members.items():
+                        state = room.latest_states.get(member_id)
+                        if not state:
+                            continue
+                        info = room.udp_clients.get(member_id)
+                        snapshot_players.append({
+                            "username": member.username,
+                            "x": state.get("x", 0),
+                            "y": state.get("y", 0),
+                            "vx": state.get("vx", 0.0),
+                            "vy": state.get("vy", 0.0),
+                            "flags": state.get("flags", 0),
+                            "heading": state.get("heading", 0),
+                            "hp": member.hp,
+                            "client_id": info.client_index if info else None,
+                            "timestamp": state.get("timestamp", udp_protocol.current_millis()),
+                        })
+                    recipients = list(room.members.values())
+                if not snapshot_players or not recipients:
+                    continue
+                payload = {
+                    "type": "state_snapshot",
+                    "timestamp": udp_protocol.current_millis(),
+                    "players": snapshot_players,
+                }
+                for member in recipients:
+                    await self.send(member, payload)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            async with self.lock:
+                self.room_snapshot_tasks.pop(room_id, None)
 
     async def _broadcast_game_over(self, room: Room, winner: str, loser: str):
         if room.game_over:
