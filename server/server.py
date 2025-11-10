@@ -50,6 +50,8 @@ class Room:
     members: Dict[str, ClientSession] = field(default_factory=dict)
     active_drops: Dict[str, Dict] = field(default_factory=dict)
     broken_tiles: set = field(default_factory=set)
+    game_over: bool = False
+    result: Optional[Dict[str, str]] = None
 
     def is_full(self) -> bool:
         return len(self.members) >= 2
@@ -202,6 +204,10 @@ class GameServer:
                 })
             return
         room.broken_tiles.clear()
+        room.game_over = False
+        room.result = None
+        for member in room.members.values():
+            member.hp = 30
         spawn_slots = ["left", "right"]
         spawn_map = {}
         members_ordered = list(room.members.values())
@@ -239,6 +245,9 @@ class GameServer:
             task.cancel()
             room.active_drops.clear()
         if room and not should_delete:
+            if room.game_over:
+                logging.info("%s left room %s after game over", client.username, room.room_id)
+                return
             logging.info("%s left room %s, declaring opponent winner", client.username, room.room_id)
             winner_name = None
             for member in room.members.values():
@@ -277,6 +286,8 @@ class GameServer:
             room = self.rooms.get(client.room_id)
             if not room:
                 return
+            if room.game_over:
+                return
             for member in room.members.values():
                 if member.username == target:
                     member.hp = max(0, member.hp - damage)
@@ -304,6 +315,8 @@ class GameServer:
         async with self.lock:
             room = self.rooms.get(client.room_id)
             if not room:
+                return
+            if room.game_over:
                 return
             loser_name = message.get("loser") or client.username
             logging.info("Player %s reported fall in room %s", loser_name, client.room_id)
@@ -348,6 +361,8 @@ class GameServer:
             room = self.rooms.get(client.room_id)
             if not room:
                 return
+            if room.game_over:
+                return
             drop = room.active_drops.get(drop_id)
             if not drop or drop.get("type") != "mushroom":
                 return
@@ -386,6 +401,8 @@ class GameServer:
             room = self.rooms.get(client.room_id)
             if not room:
                 return
+            if room.game_over:
+                return
             key = (tile_x, tile_y)
             if key in room.broken_tiles:
                 return
@@ -414,6 +431,8 @@ class GameServer:
                 async with self.lock:
                     room = self.rooms.get(room_id)
                     if not room or room.is_empty():
+                        break
+                    if room.game_over:
                         break
                     level_width = LEVEL_WIDTH_PIXELS
                     drop_type = random.choice(["coin", "mushroom"])
@@ -454,6 +473,10 @@ class GameServer:
                     room.active_drops.clear()
 
     async def _broadcast_game_over(self, room: Room, winner: str, loser: str):
+        if room.game_over:
+            return
+        room.game_over = True
+        room.result = {"winner": winner, "loser": loser}
         payload = {
             "type": "game_over",
             "winner": winner,

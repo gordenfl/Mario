@@ -1,1 +1,4 @@
 editor/__pycache__/main.cpython-311.pyc
+client/build/*
+client/dist/*
+client/main.spec

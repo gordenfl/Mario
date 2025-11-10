@@ -13,3 +13,15 @@
 
 3. 数据库的实现
   数据库的实现主要是为了存储用户的登录信息, 包括用户名, 密码等.同时还需要存储玩家的游戏信息, 包括玩家的得分, 玩家的等级等.数据库的设计需要考虑可扩展性, 因为未来可能会有更多的功能需求, 所以需要设计好数据库结构, 方便后续的扩展.
+
+pyinstaller \
+  --onefile \
+  --windowed \
+  --collect-all pygame \
+  --collect-all scipy \
+  --add-data "img:img" \
+  --add-data "fonts:fonts" \
+  --add-data "sfx:sfx" \
+  --add-data "sprites:sprites" \
+  --add-data "levels:levels" \
+  main.py
