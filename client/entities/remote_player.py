@@ -1,6 +1,7 @@
 import pygame
 from pygame.transform import flip
 from typing import Optional
+import time
 
 from classes.Animation import Animation
 from classes.Sprites import Sprites
@@ -41,6 +42,7 @@ class RemotePlayer:
         self.prev_position = [0, 0]
         self.hurt_timer = 0
         self.last_udp_timestamp = 0
+        self.last_udp_monotonic = 0.0
         self.state = {
             "position": [0, 0],
             "velocity": [0, 0],
@@ -50,6 +52,11 @@ class RemotePlayer:
         }
 
     def update_from_state(self, state: dict):
+        # If UDP updates are active, ignore low-frequency TCP state updates
+        # for a short window to prevent position jitter/flicker.
+        now = time.monotonic()
+        if self.last_udp_monotonic and (now - self.last_udp_monotonic) < 0.45:
+            return
         old_hp = self.state.get("hp", 30)
         position = state.get("position", self.state["position"])
         self.state.update(state)
@@ -91,7 +98,10 @@ class RemotePlayer:
             self.state["flags"] = flags
         vx = velocity[0] if isinstance(velocity, (list, tuple)) and len(velocity) > 0 else 0.0
         vy = velocity[1] if isinstance(velocity, (list, tuple)) and len(velocity) > 1 else 0.0
-        self._apply_motion(position[0], position[1], vx, vy, heading, on_ground, state.get("timestamp"))
+        timestamp = state.get("timestamp")
+        if isinstance(timestamp, int) and self.last_udp_timestamp and timestamp < self.last_udp_timestamp:
+            return
+        self._apply_motion(position[0], position[1], vx, vy, heading, on_ground, timestamp)
         self.state["velocity"] = [vx, vy]
         self.state["position"] = [position[0], position[1]]
 
@@ -105,12 +115,11 @@ class RemotePlayer:
         if self.heading == -1:
             image = flip(image, True, False)
         hurt_active = self.hurt_timer > 0
-        timer_value = self.hurt_timer
         if self.hurt_timer > 0:
             self.hurt_timer -= 1
-        skip_frame = hurt_active and ((timer_value // 2) % 2 == 1)
-        if not skip_frame:
-            surface.blit(image, draw_rect)
+        # Keep remote player continuously visible; use label tint for hurt feedback
+        # instead of frame skipping to avoid perceived flicker on wider-sync updates.
+        surface.blit(image, draw_rect)
         font = get_font(18)
         label_color = (255, 200, 200) if hurt_active else (255, 255, 255)
         label = font.render(self.username, True, label_color)
@@ -121,6 +130,8 @@ class RemotePlayer:
         self.hurt_timer = max(self.hurt_timer, 30)
 
     def apply_udp_state(self, state: dict, timestamp: Optional[int] = None):
+        if isinstance(timestamp, int) and self.last_udp_timestamp and timestamp < self.last_udp_timestamp:
+            return
         x = state.get("x", self.rect.x)
         y = state.get("y", self.rect.y)
         vx = state.get("vx", 0.0)
@@ -130,8 +141,14 @@ class RemotePlayer:
         self.state["flags"] = flags
         on_ground = bool(flags & 0b0001)
         self._apply_motion(x, y, vx, vy, heading, on_ground, timestamp)
+        self.last_udp_monotonic = time.monotonic()
 
     def apply_snapshot(self, snapshot: dict):
+        timestamp = snapshot.get("timestamp")
+        if isinstance(timestamp, int) and self.last_udp_timestamp and timestamp < self.last_udp_timestamp:
+            return
+        if self.last_udp_monotonic and (time.monotonic() - self.last_udp_monotonic) < 0.35:
+            return
         position = snapshot.get("position", [self.rect.x, self.rect.y])
         velocity = snapshot.get("velocity", [0.0, 0.0])
         heading = snapshot.get("heading", self.heading)
@@ -146,7 +163,7 @@ class RemotePlayer:
             velocity[1] if len(velocity) > 1 else 0.0,
             heading,
             on_ground,
-            snapshot.get("timestamp"),
+            timestamp,
         )
 
     def _apply_motion(self, x: float, y: float, vx: float, vy: float, heading: Optional[int], on_ground: Optional[bool], timestamp: Optional[int]):
