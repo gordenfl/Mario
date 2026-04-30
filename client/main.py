@@ -698,12 +698,9 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     if game_over_info:
                         break
 
-                # Anchor camera further left on wider screens so initial framing
-                # does not hug the right map boundary.
-                camera_anchor_px = int(windowSize[0] * 0.58)
-                raw_camera_x = mario.rect.x - camera_anchor_px
-                max_camera_world_x = max(level.levelLength * 32 - windowSize[0], 0)
-                camera_world_x = max(0, min(raw_camera_x, max_camera_world_x))
+                # Keep entity/projectile drawing on the exact same camera transform
+                # used by level rendering (mario.camera).
+                camera_world_x = max(0, -int(mario.camera.x))
                 camera_world_y = 0
                 level_width = max(level.levelLength * 32, windowSize[0])
                 for bullet_key, bullet in list(projectiles.items()):
