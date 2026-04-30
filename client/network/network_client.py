@@ -9,8 +9,14 @@ from typing import Dict, List, Optional, Tuple
 from .protocol import (
     MSG_HELLO_ACK,
     MSG_PLAYER_STATE,
+    MSG_PROJECTILE_STATE,
+    MSG_ACTION,
     pack_player_state,
+    pack_projectile_state,
+    pack_action,
     unpack_player_state,
+    unpack_projectile_state,
+    unpack_action,
 )
 from .udp_client import UdpClient
 
@@ -196,6 +202,17 @@ class NetworkClient:
                 except ValueError:
                     logging.debug("Dropping malformed player state payload from %s", event.get("addr"))
                     event["player_state"] = None
+            elif msg_type == MSG_PROJECTILE_STATE:
+                try:
+                    event["projectile_state"] = unpack_projectile_state(event.get("payload", b""))
+                except ValueError:
+                    logging.debug("Dropping malformed projectile state from %s", event.get("addr"))
+                    event["projectile_state"] = None
+            elif msg_type == MSG_ACTION:
+                try:
+                    event["action"] = unpack_action(event.get("payload", b""))
+                except ValueError:
+                    event["action"] = None
         return events
 
     def udp_connected(self) -> bool:
@@ -204,6 +221,7 @@ class NetworkClient:
     def send_udp_player_state(self, state: Dict[str, float]) -> bool:
         """Send the player's current state over UDP."""
         if not self._udp_client or not self._udp_enabled:
+            logging.debug("[udp] skip state send (udp disabled)")
             return False
         now = time.monotonic()
         if now - self._last_udp_state_sent < self._udp_state_interval:
@@ -216,10 +234,26 @@ class NetworkClient:
             int(state.get("flags", 0)),
             int(state.get("heading", 0)),
         )
-        if self._udp_client.send(MSG_PLAYER_STATE, payload):
+        ok = self._udp_client.send(MSG_PLAYER_STATE, payload)
+        logging.debug("[udp] send state -> %s payload=%s", ok, state)
+        if ok:
             self._last_udp_state_sent = now
-            return True
-        return False
+        return ok
+
+    def send_udp_action(self, action_type: int, param: int = 0, extra: int = 0, client_id: Optional[int] = None) -> bool:
+        if not self._udp_client or not self._udp_enabled:
+            logging.debug("[udp] skip action send (udp disabled)")
+            return False
+        payload = pack_action(action_type, param, extra)
+        ok = self._udp_client.send(MSG_ACTION, payload, client_id=client_id)
+        logging.debug("[udp] send action type=%s param=%s -> %s", action_type, param, ok)
+        return ok
+
+    def send_udp_projectile(self, projectile_id: int, x: float, y: float, vx: float, vy: float, flags: int, client_id: Optional[int] = None) -> bool:
+        if not self._udp_client or not self._udp_enabled:
+            return False
+        payload = pack_projectile_state(projectile_id, x, y, vx, vy, flags)
+        return self._udp_client.send(MSG_PROJECTILE_STATE, payload, client_id=client_id)
 
     # 非阻塞请求接口，配合轮询使用
     def request_room_list(self):

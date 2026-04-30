@@ -224,10 +224,18 @@ class Mario(EntityBase):
 
     def handle_fire_input(self, pressed: bool):
         if not self.canShoot:
+            try:
+                print(f"[debug] cannot shoot: canShoot={self.canShoot} fireCooldown={self.fireCooldown}")
+            except Exception:
+                pass
             self.fire_button_held = pressed
             return
         if pressed:
             if not self.fire_button_held and self.fireCooldown == 0:
+                try:
+                    print(f"[debug] queue fire: canShoot={self.canShoot} fireCooldown={self.fireCooldown}")
+                except Exception:
+                    pass
                 self._queue_fireball()
             self.fire_button_held = True
         else:

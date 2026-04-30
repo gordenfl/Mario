@@ -1,0 +1,679 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		706094F72FA312400054C855 /* MarioiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706094EB2FA312400054C855 /* MarioiOSApp.swift */; };
+		706094F82FA312400054C855 /* TCPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706094EF2FA312400054C855 /* TCPClient.swift */; };
+		706094F92FA312400054C855 /* ServerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706094EC2FA312400054C855 /* ServerModels.swift */; };
+		706094FA2FA312400054C855 /* GameViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706094F22FA312400054C855 /* GameViewModel.swift */; };
+		706094FB2FA312400054C855 /* UDPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706094F02FA312400054C855 /* UDPClient.swift */; };
+		706094FC2FA312400054C855 /* GameCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706094F42FA312400054C855 /* GameCanvasView.swift */; };
+		706094FD2FA312400054C855 /* LoginLobbyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706094F52FA312400054C855 /* LoginLobbyView.swift */; };
+		706094FE2FA312400054C855 /* GameProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706094EE2FA312400054C855 /* GameProtocol.swift */; };
+		706094FF2FA312400054C855 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706094EA2FA312400054C855 /* ContentView.swift */; };
+		70A1B0012FA320000054C855 /* SpriteKitGameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70A1B0002FA320000054C855 /* SpriteKitGameScene.swift */; };
+		70A1B0032FA320100054C855 /* LevelLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70A1B0022FA320100054C855 /* LevelLoader.swift */; };
+		70A1B0052FA320200054C855 /* GameplayModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70A1B0042FA320200054C855 /* GameplayModels.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		706094CD2FA311D80054C855 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 706094AE2FA311D70054C855 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 706094B52FA311D70054C855;
+			remoteInfo = MarioOnline;
+		};
+		706094D72FA311D80054C855 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 706094AE2FA311D70054C855 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 706094B52FA311D70054C855;
+			remoteInfo = MarioOnline;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		706094B62FA311D70054C855 /* MarioOnline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MarioOnline.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		706094CC2FA311D80054C855 /* MarioOnlineTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MarioOnlineTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		706094D62FA311D80054C855 /* MarioOnlineUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MarioOnlineUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		706094EA2FA312400054C855 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		706094EB2FA312400054C855 /* MarioiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarioiOSApp.swift; sourceTree = "<group>"; };
+		706094EC2FA312400054C855 /* ServerModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerModels.swift; sourceTree = "<group>"; };
+		706094EE2FA312400054C855 /* GameProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameProtocol.swift; sourceTree = "<group>"; };
+		706094EF2FA312400054C855 /* TCPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TCPClient.swift; sourceTree = "<group>"; };
+		706094F02FA312400054C855 /* UDPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UDPClient.swift; sourceTree = "<group>"; };
+		706094F22FA312400054C855 /* GameViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameViewModel.swift; sourceTree = "<group>"; };
+		706094F42FA312400054C855 /* GameCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameCanvasView.swift; sourceTree = "<group>"; };
+		706094F52FA312400054C855 /* LoginLobbyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginLobbyView.swift; sourceTree = "<group>"; };
+		70A1B0002FA320000054C855 /* SpriteKitGameScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpriteKitGameScene.swift; sourceTree = "<group>"; };
+		70A1B0022FA320100054C855 /* LevelLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LevelLoader.swift; sourceTree = "<group>"; };
+		70A1B0042FA320200054C855 /* GameplayModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameplayModels.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		706094DE2FA311D80054C855 /* Exceptions for "MarioOnline" folder in "MarioOnline" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 706094B52FA311D70054C855 /* MarioOnline */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		706094B82FA311D70054C855 /* MarioOnline */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				706094DE2FA311D80054C855 /* Exceptions for "MarioOnline" folder in "MarioOnline" target */,
+			);
+			path = MarioOnline;
+			sourceTree = "<group>";
+		};
+		706094CF2FA311D80054C855 /* MarioOnlineTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MarioOnlineTests;
+			sourceTree = "<group>";
+		};
+		706094D92FA311D80054C855 /* MarioOnlineUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MarioOnlineUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		706094B32FA311D70054C855 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		706094C92FA311D80054C855 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		706094D32FA311D80054C855 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		706094AD2FA311D70054C855 = {
+			isa = PBXGroup;
+			children = (
+				706094EA2FA312400054C855 /* ContentView.swift */,
+				706094EB2FA312400054C855 /* MarioiOSApp.swift */,
+				706094ED2FA312400054C855 /* Models */,
+				706094F12FA312400054C855 /* Networking */,
+				706094F32FA312400054C855 /* ViewModels */,
+				706094F62FA312400054C855 /* Views */,
+				706094B82FA311D70054C855 /* MarioOnline */,
+				706094CF2FA311D80054C855 /* MarioOnlineTests */,
+				706094D92FA311D80054C855 /* MarioOnlineUITests */,
+				706094B72FA311D70054C855 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		706094B72FA311D70054C855 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				706094B62FA311D70054C855 /* MarioOnline.app */,
+				706094CC2FA311D80054C855 /* MarioOnlineTests.xctest */,
+				706094D62FA311D80054C855 /* MarioOnlineUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		706094ED2FA312400054C855 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				706094EC2FA312400054C855 /* ServerModels.swift */,
+				70A1B0022FA320100054C855 /* LevelLoader.swift */,
+				70A1B0042FA320200054C855 /* GameplayModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		706094F12FA312400054C855 /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				706094EE2FA312400054C855 /* GameProtocol.swift */,
+				706094EF2FA312400054C855 /* TCPClient.swift */,
+				706094F02FA312400054C855 /* UDPClient.swift */,
+			);
+			path = Networking;
+			sourceTree = "<group>";
+		};
+		706094F32FA312400054C855 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				706094F22FA312400054C855 /* GameViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		706094F62FA312400054C855 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				706094F42FA312400054C855 /* GameCanvasView.swift */,
+				706094F52FA312400054C855 /* LoginLobbyView.swift */,
+				70A1B0002FA320000054C855 /* SpriteKitGameScene.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		706094B52FA311D70054C855 /* MarioOnline */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 706094DF2FA311D80054C855 /* Build configuration list for PBXNativeTarget "MarioOnline" */;
+			buildPhases = (
+				706094B22FA311D70054C855 /* Sources */,
+				706094B32FA311D70054C855 /* Frameworks */,
+				706094B42FA311D70054C855 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				706094B82FA311D70054C855 /* MarioOnline */,
+			);
+			name = MarioOnline;
+			packageProductDependencies = (
+			);
+			productName = MarioOnline;
+			productReference = 706094B62FA311D70054C855 /* MarioOnline.app */;
+			productType = "com.apple.product-type.application";
+		};
+		706094CB2FA311D80054C855 /* MarioOnlineTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 706094E42FA311D80054C855 /* Build configuration list for PBXNativeTarget "MarioOnlineTests" */;
+			buildPhases = (
+				706094C82FA311D80054C855 /* Sources */,
+				706094C92FA311D80054C855 /* Frameworks */,
+				706094CA2FA311D80054C855 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				706094CE2FA311D80054C855 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				706094CF2FA311D80054C855 /* MarioOnlineTests */,
+			);
+			name = MarioOnlineTests;
+			packageProductDependencies = (
+			);
+			productName = MarioOnlineTests;
+			productReference = 706094CC2FA311D80054C855 /* MarioOnlineTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		706094D52FA311D80054C855 /* MarioOnlineUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 706094E72FA311D80054C855 /* Build configuration list for PBXNativeTarget "MarioOnlineUITests" */;
+			buildPhases = (
+				706094D22FA311D80054C855 /* Sources */,
+				706094D32FA311D80054C855 /* Frameworks */,
+				706094D42FA311D80054C855 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				706094D82FA311D80054C855 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				706094D92FA311D80054C855 /* MarioOnlineUITests */,
+			);
+			name = MarioOnlineUITests;
+			packageProductDependencies = (
+			);
+			productName = MarioOnlineUITests;
+			productReference = 706094D62FA311D80054C855 /* MarioOnlineUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		706094AE2FA311D70054C855 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2610;
+				LastUpgradeCheck = 2610;
+				TargetAttributes = {
+					706094B52FA311D70054C855 = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
+					706094CB2FA311D80054C855 = {
+						CreatedOnToolsVersion = 26.1.1;
+						TestTargetID = 706094B52FA311D70054C855;
+					};
+					706094D52FA311D80054C855 = {
+						CreatedOnToolsVersion = 26.1.1;
+						TestTargetID = 706094B52FA311D70054C855;
+					};
+				};
+			};
+			buildConfigurationList = 706094B12FA311D70054C855 /* Build configuration list for PBXProject "MarioOnline" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 706094AD2FA311D70054C855;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 706094B72FA311D70054C855 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				706094B52FA311D70054C855 /* MarioOnline */,
+				706094CB2FA311D80054C855 /* MarioOnlineTests */,
+				706094D52FA311D80054C855 /* MarioOnlineUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		706094B42FA311D70054C855 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		706094CA2FA311D80054C855 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		706094D42FA311D80054C855 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		706094B22FA311D70054C855 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				706094F72FA312400054C855 /* MarioiOSApp.swift in Sources */,
+				706094F82FA312400054C855 /* TCPClient.swift in Sources */,
+				706094F92FA312400054C855 /* ServerModels.swift in Sources */,
+				706094FA2FA312400054C855 /* GameViewModel.swift in Sources */,
+				706094FB2FA312400054C855 /* UDPClient.swift in Sources */,
+				706094FC2FA312400054C855 /* GameCanvasView.swift in Sources */,
+				706094FD2FA312400054C855 /* LoginLobbyView.swift in Sources */,
+				706094FE2FA312400054C855 /* GameProtocol.swift in Sources */,
+				706094FF2FA312400054C855 /* ContentView.swift in Sources */,
+				70A1B0012FA320000054C855 /* SpriteKitGameScene.swift in Sources */,
+				70A1B0032FA320100054C855 /* LevelLoader.swift in Sources */,
+				70A1B0052FA320200054C855 /* GameplayModels.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		706094C82FA311D80054C855 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		706094D22FA311D80054C855 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		706094CE2FA311D80054C855 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 706094B52FA311D70054C855 /* MarioOnline */;
+			targetProxy = 706094CD2FA311D80054C855 /* PBXContainerItemProxy */;
+		};
+		706094D82FA311D80054C855 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 706094B52FA311D70054C855 /* MarioOnline */;
+			targetProxy = 706094D72FA311D80054C855 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		706094E02FA311D80054C855 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KH69R2835S;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MarioOnline/Info.plist;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UIMainStoryboardFile = Main;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gordenfl.MarioOnline;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		706094E12FA311D80054C855 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KH69R2835S;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MarioOnline/Info.plist;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UIMainStoryboardFile = Main;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gordenfl.MarioOnline;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		706094E22FA311D80054C855 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = KH69R2835S;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		706094E32FA311D80054C855 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = KH69R2835S;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		706094E52FA311D80054C855 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KH69R2835S;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gordenfl.MarioOnlineTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MarioOnline.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MarioOnline";
+			};
+			name = Debug;
+		};
+		706094E62FA311D80054C855 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KH69R2835S;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gordenfl.MarioOnlineTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MarioOnline.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MarioOnline";
+			};
+			name = Release;
+		};
+		706094E82FA311D80054C855 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KH69R2835S;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gordenfl.MarioOnlineUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = MarioOnline;
+			};
+			name = Debug;
+		};
+		706094E92FA311D80054C855 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KH69R2835S;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gordenfl.MarioOnlineUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = MarioOnline;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		706094B12FA311D70054C855 /* Build configuration list for PBXProject "MarioOnline" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				706094E22FA311D80054C855 /* Debug */,
+				706094E32FA311D80054C855 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		706094DF2FA311D80054C855 /* Build configuration list for PBXNativeTarget "MarioOnline" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				706094E02FA311D80054C855 /* Debug */,
+				706094E12FA311D80054C855 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		706094E42FA311D80054C855 /* Build configuration list for PBXNativeTarget "MarioOnlineTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				706094E52FA311D80054C855 /* Debug */,
+				706094E62FA311D80054C855 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		706094E72FA311D80054C855 /* Build configuration list for PBXNativeTarget "MarioOnlineUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				706094E82FA311D80054C855 /* Debug */,
+				706094E92FA311D80054C855 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 706094AE2FA311D70054C855 /* Project object */;
+}

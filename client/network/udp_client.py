@@ -61,11 +61,12 @@ class UdpClient:
         except OSError:
             pass
 
-    def send(self, msg_type: int, payload: bytes = b"") -> bool:
+    def send(self, msg_type: int, payload: bytes = b"", client_id: Optional[int] = None) -> bool:
         """Send a UDP packet to the server."""
         if not self.socket or not self.server_addr:
             return False
-        packet = pack_message(msg_type, self.client_id, self.seq & 0xFFFF, current_millis(), payload)
+        cid = self.client_id if client_id is None else client_id
+        packet = pack_message(msg_type, cid & 0xFF, self.seq & 0xFFFF, current_millis(), payload)
         self.seq = (self.seq + 1) & 0xFFFF
         try:
             self.socket.sendto(packet, self.server_addr)
@@ -101,6 +102,7 @@ class UdpClient:
             if msg_type == MSG_HELLO_ACK:
                 if not self.connected:
                     self.connected = True
+                    print(f"[udp] handshake ack from {addr} (client_id={self.client_id})")
                 events.append((msg_type, event))
             else:
                 events.append((msg_type, event))

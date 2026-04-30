@@ -3,3 +3,4 @@ client/build/*
 client/dist/*
 client/main.spec
 *.pyc
+client/venv/*

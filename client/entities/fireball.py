@@ -1,6 +1,8 @@
 import math
 import pygame
 
+from network.protocol import PROJECTILE_FLAG_DESPAWN
+
 
 class Fireball:
     def __init__(
@@ -33,6 +35,7 @@ class Fireball:
         self.max_lifetime_frames = 360
         self.bounces = 0
         self.hit_wall = False
+        self.desired_direction = self.direction
 
     def update(self):
         self.vy += self.gravity
@@ -81,3 +84,15 @@ class Fireball:
         center = draw_rect.center
         pygame.draw.circle(surface, (255, 140, 32), center, 6)
         pygame.draw.circle(surface, (255, 230, 160), center, 3)
+
+    def set_state(self, state: dict):
+        self.x = float(state.get("x", self.x))
+        self.y = float(state.get("y", self.y))
+        new_vx = float(state.get("vx", self.vx))
+        if new_vx != 0:
+            self.direction = 1 if new_vx > 0 else -1
+        self.vx = new_vx
+        self.vy = float(state.get("vy", self.vy))
+        self.rect.center = (int(self.x), int(self.y))
+        if state.get("flags", 0) & PROJECTILE_FLAG_DESPAWN:
+            self.hit_wall = True

@@ -15,7 +15,15 @@ from entities.sky_drop import SkyDrop, SkyMushroom
 from typing import Optional
 from entities.remote_player import RemotePlayer
 from network.network_client import NetworkClient, NetworkError
-from network.protocol import MSG_PLAYER_STATE
+from network.protocol import (
+    MSG_PLAYER_STATE,
+    MSG_PROJECTILE_STATE,
+    MSG_ACTION,
+    PROJECTILE_FLAG_SPAWN,
+    PROJECTILE_FLAG_UPDATE,
+    PROJECTILE_FLAG_DESPAWN,
+    ACTION_FIRE,
+)
 from ui.widgets import Button, TextInput, get_font
 
 
@@ -405,17 +413,26 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
             break
     udp_info = room_ready_msg.get("udp")
     if isinstance(udp_info, dict):
-        network.enable_udp(
-            token=udp_info.get("token", ""),
-            client_id=udp_info.get("client_id", 0),
-            port=udp_info.get("port"),
-            host=udp_info.get("host"),
-        )
+        token = udp_info.get("token", "")
+        udp_client_id = udp_info.get("client_id", 0)
+        udp_port = udp_info.get("port")
+        udp_host = udp_info.get("host")
+        if network.enable_udp(
+            token=token,
+            client_id=udp_client_id,
+            port=udp_port,
+            host=udp_host,
+        ):
+            print(f"[debug] UDP enabled with token={token} client_id={udp_client_id} port={udp_port} host={udp_host}")
+        else:
+            print("[debug] UDP enable failed", token, udp_client_id, udp_port, udp_host)
         if local_udp_id is None:
             client_id = udp_info.get("client_id")
             if isinstance(client_id, int):
                 local_udp_id = client_id
     projectiles: dict[str, Fireball] = {}
+    projectile_owner_map: dict[str, str] = {}
+    projectile_id_by_key: dict[str, int] = {}
     fall_reported = False
     fall_threshold = 440
     game_over_info = None
@@ -451,12 +468,15 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
             bullet_id = message.get("bullet_id")
             owner = message.get("owner")
             if event == "spawn" and bullet_id:
-                if bullet_id not in projectiles and owner != username:
+                if bullet_id not in projectiles:
                     position = message.get("position", [0, 0])
                     direction = message.get("direction", 1)
                     speed = message.get("speed", 8)
                     projectiles[bullet_id] = Fireball(bullet_id, owner, position, direction, speed, level)
+                    projectile_owner_map[bullet_id] = owner
             elif event == "despawn" and bullet_id:
+                projectile_owner_map.pop(bullet_id, None)
+                projectile_id_by_key.pop(bullet_id, None)
                 projectiles.pop(bullet_id, None)
         elif msg_type == "spawn_drop":
             spawn_drop_from_event(message)
@@ -600,6 +620,36 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     if player_state is None:
                         continue
                     remote.apply_udp_state(player_state, event.get("timestamp"))
+                elif msg_type == MSG_PROJECTILE_STATE:
+                    state = event.get("projectile_state")
+                    if state is None:
+                        print("[udp] projectile state missing payload")
+                        continue
+                    sender_id = event.get("client_id")
+                    owner_name = udp_id_map.get(sender_id)
+                    if owner_name is None:
+                        print(f"[udp] projectile owner missing for sender={sender_id}")
+                        continue
+                    proj_id = state.get("projectile_id")
+                    if proj_id is None:
+                        continue
+                    proj_key = f"udp_{proj_id}"
+                    flags = state.get("flags", 0)
+                    if flags & PROJECTILE_FLAG_DESPAWN:
+                        projectile_owner_map.pop(proj_key, None)
+                        projectile_id_by_key.pop(proj_key, None)
+                        projectiles.pop(proj_key, None)
+                        continue
+                    if proj_key not in projectiles:
+                        spawn_position = (state.get("x", 0), state.get("y", 0))
+                        bullet = Fireball(proj_key, owner_name, spawn_position, 1 if state.get("vx", 0) >= 0 else -1, 8, level)
+                        projectiles[proj_key] = bullet
+                        print(f"[debug] projectile spawn {proj_key} owner={owner_name} pos={spawn_position}")
+                    projectile_owner_map[proj_key] = owner_name
+                    projectile_id_by_key[proj_key] = proj_id
+                    projectile = projectiles.get(proj_key)
+                    if projectile:
+                        projectile.set_state(state)
 
             if mario.pause:
                 mario.pauseObj.update()
@@ -635,19 +685,8 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
 
                 spawned_projectiles = mario.consume_spawned_projectiles()
                 for data in spawned_projectiles:
-                    bullet_id = uuid.uuid4().hex
                     direction = data.get("direction", 1)
-                    position = data.get("position", [mario.rect.centerx, mario.rect.centery])
-                    speed = data.get("speed", 8)
-                    projectiles[bullet_id] = Fireball(bullet_id, username, position, direction, speed, level)
-                    network.send_bullet_event({
-                        "event": "spawn",
-                        "bullet_id": bullet_id,
-                        "owner": username,
-                        "position": position,
-                        "direction": direction,
-                        "speed": speed,
-                    })
+                    network.send_udp_action(ACTION_FIRE, param=1 if direction >= 0 else 0, client_id=local_udp_id)
 
                 messages = network.poll()
                 for message in messages:
@@ -660,37 +699,37 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                 camera_world_x = max(0, min(raw_camera_x, max_camera_world_x))
                 camera_world_y = 0
                 level_width = max(level.levelLength * 32, windowSize[0])
-                for bullet_id, bullet in list(projectiles.items()):
-                    bullet.update()
-                    if bullet.owner == username:
+                for bullet_key, bullet in list(projectiles.items()):
+                    owner_name = projectile_owner_map.get(bullet_key, bullet.owner)
+                    if owner_name == username:
+                        bullet.update()
+                        proj_id = projectile_id_by_key.get(bullet_key)
                         hit_target = None
                         for remote in remote_players.values():
                             if remote.visible and bullet.rect.colliderect(remote.rect):
                                 hit_target = remote.username
                                 break
+                        should_despawn = False
                         if hit_target:
                             network.send_player_hit(hit_target, damage=5)
-                            network.send_bullet_event({
-                                "event": "despawn",
-                                "bullet_id": bullet_id,
-                                "owner": username,
-                            })
-                            projectiles.pop(bullet_id, None)
-                            continue
-                        if bullet.should_despawn(level_width):
-                            network.send_bullet_event({
-                                "event": "despawn",
-                                "bullet_id": bullet_id,
-                                "owner": username,
-                            })
-                            projectiles.pop(bullet_id, None)
+                            should_despawn = True
+                        elif bullet.should_despawn(level_width):
+                            should_despawn = True
+                        flags = PROJECTILE_FLAG_UPDATE
+                        if should_despawn:
+                            flags |= PROJECTILE_FLAG_DESPAWN
+                        if proj_id is not None:
+                            network.send_udp_projectile(proj_id, bullet.x, bullet.y, bullet.vx, bullet.vy, flags, client_id=local_udp_id)
+                        if should_despawn:
+                            projectile_owner_map.pop(bullet_key, None)
+                            projectile_id_by_key.pop(bullet_key, None)
+                            projectiles.pop(bullet_key, None)
                             continue
                     else:
+                        projectile_owner_map[bullet_key] = owner_name
                         if not mario.is_dying and bullet.rect.colliderect(mario.rect):
-                            projectiles.pop(bullet_id, None)
-                            continue
-                        if bullet.should_despawn(level_width):
-                            projectiles.pop(bullet_id, None)
+                            projectiles.pop(bullet_key, None)
+                            projectile_id_by_key.pop(bullet_key, None)
                             continue
 
                 for remote in remote_players.values():
