@@ -194,7 +194,8 @@ class Mario(EntityBase):
         self.dashboard.points += 100
 
     def gameOver(self):
-        srf = pygame.Surface((640, 480))
+        width, height = self.screen.get_size()
+        srf = pygame.Surface((width, height))
         srf.set_colorkey((255, 255, 255), pygame.RLEACCEL)
         srf.set_alpha(128)
         self.sound.music_channel.stop()

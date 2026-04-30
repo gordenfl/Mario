@@ -318,6 +318,7 @@ def compute_spawn_position(spawn: str, level: Level) -> tuple[int, int]:
     base_y = 32 * 11
     if spawn == "right":
         if level.levelLength:
+            # Keep original gameplay spawn point for right player.
             spawn_x = max((level.levelLength - 3) * 32, windowSize[0] - 96)
         else:
             spawn_x = windowSize[0] - 96
@@ -385,6 +386,9 @@ def collect_udp_state(mario: Mario) -> dict:
 
 def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict):
     pygame.mixer.pre_init(44100, -16, 2, 4096)
+    # Re-apply the target game resolution every time a match starts.
+    # This avoids stale window sizes when clients reconnect/join from older sessions.
+    screen = pygame.display.set_mode(windowSize)
     pygame.display.set_caption("Super Mario Multiplayer")
     max_frame_rate = 60
     clock = pygame.time.Clock()
@@ -694,7 +698,10 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     if game_over_info:
                         break
 
-                raw_camera_x = mario.rect.x - (10 * 32)
+                # Anchor camera further left on wider screens so initial framing
+                # does not hug the right map boundary.
+                camera_anchor_px = int(windowSize[0] * 0.58)
+                raw_camera_x = mario.rect.x - camera_anchor_px
                 max_camera_world_x = max(level.levelLength * 32 - windowSize[0], 0)
                 camera_world_x = max(0, min(raw_camera_x, max_camera_world_x))
                 camera_world_y = 0
@@ -839,17 +846,22 @@ def main():
         pygame.display.flip()
 
         if current_scene.next_scene == "login":
+            screen = pygame.display.set_mode(windowSize)
             network = NetworkClient()
             current_scene = LoginScene(screen, network)
         elif current_scene.next_scene == "lobby":
+            screen = pygame.display.set_mode(windowSize)
             username = current_scene.payload["username"]
             current_scene = LobbyScene(screen, network, username)
             network.request_room_list()
         elif current_scene.next_scene == "game":
             payload = current_scene.payload
             run_game(screen, network, payload["username"], payload["room_ready"])
+            # Keep scene surface in sync with the actual display surface after game mode resets.
+            screen = pygame.display.get_surface() or pygame.display.set_mode(windowSize)
             network.close()
             # 回到大厅，保持登录会话
+            screen = pygame.display.set_mode(windowSize)
             network = NetworkClient()
             try:
                 network.connect(payload["username"])
