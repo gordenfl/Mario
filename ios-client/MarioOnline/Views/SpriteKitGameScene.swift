@@ -35,6 +35,7 @@ final class SpriteKitGameScene: SKScene {
     private var localAnimState: AnimState = .idle
     private var hitFlashUntil: TimeInterval = 0
     private var jumpQueued = false
+    private var jumpBufferFrames = 0
 
     private enum AnimState {
         case idle
@@ -74,6 +75,7 @@ final class SpriteKitGameScene: SKScene {
 
     func triggerJump() {
         jumpQueued = true
+        jumpBufferFrames = 8
     }
 
     func syncRemotePlayers(_ states: [Int: PlayerState]) {
@@ -183,12 +185,17 @@ final class SpriteKitGameScene: SKScene {
             heading = 1
         }
         localPlayer.physicsBody?.velocity.dx = vx
-        if jumpQueued {
-            let vy = localPlayer.physicsBody?.velocity.dy ?? 0
-            if abs(vy) < 4 {
-                localPlayer.physicsBody?.applyImpulse(CGVector(dx: 0, dy: 260))
+        if jumpQueued || jumpBufferFrames > 0 {
+            if isPlayerGrounded() {
+                localPlayer.physicsBody?.applyImpulse(CGVector(dx: 0, dy: 40))
+                jumpQueued = false
+                jumpBufferFrames = 0
+            } else {
+                jumpBufferFrames = max(0, jumpBufferFrames - 1)
+                if jumpBufferFrames == 0 {
+                    jumpQueued = false
+                }
             }
-            jumpQueued = false
         }
         let minX = playerSize.width / 2
         let maxX = worldWidth - playerSize.width / 2
@@ -355,6 +362,23 @@ final class SpriteKitGameScene: SKScene {
         let worldY = CGFloat(mapRows - y - 1) * tileSize + tileSize / 2
         let worldX = CGFloat(x) * tileSize + tileSize / 2
         return CGPoint(x: worldX, y: worldY)
+    }
+
+    private func isPlayerGrounded() -> Bool {
+        let footY = localPlayer.position.y - playerSize.height / 2 - 3
+        let sampleXs = [
+            localPlayer.position.x - playerSize.width * 0.3,
+            localPlayer.position.x,
+            localPlayer.position.x + playerSize.width * 0.3
+        ]
+        for x in sampleXs {
+            let tx = Int(floor(x / tileSize))
+            let ty = mapRows - 1 - Int(floor(footY / tileSize))
+            if solidTiles["\(tx):\(ty)"] != nil {
+                return true
+            }
+        }
+        return false
     }
 
     private func makeRemoteNode(id: Int) -> SKSpriteNode {
