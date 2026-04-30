@@ -94,6 +94,7 @@ enum LevelLoader {
         levelBottomY: Int
     ) {
         guard let rows = value as? [[Any]] else { return }
+        let pipeTopDownShift = 1
         for row in rows {
             guard
                 row.count >= 3,
@@ -101,11 +102,12 @@ enum LevelLoader {
                 let topY = row[1] as? Int,
                 let height = row[2] as? Int
             else { continue }
+            let effectiveTopY = topY + pipeTopDownShift
             // Match PC logic (Level.addPipeSprite): pipe body extends well below
             // declared height, effectively reaching the visible ground.
-            let declaredBottomY = topY + max(height, 1) - 1
+            let declaredBottomY = effectiveTopY + max(height, 1) - 1
             let pipeBottomY = max(declaredBottomY, levelBottomY)
-            for y in topY...pipeBottomY {
+            for y in effectiveTopY...pipeBottomY {
                 let k1 = "\(x):\(y)"
                 let k2 = "\(x + 1):\(y)"
                 set.insert(k1)

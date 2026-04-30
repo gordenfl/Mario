@@ -12,7 +12,8 @@ final class SpriteKitGameScene: SKScene {
     private let pcGravityPerFrame: CGFloat = 0.8
     private let pcJumpVelocityPerFrame: CGFloat = 12.0
     private let spriteKitStableGravity: CGFloat = 24.0
-    private let spriteKitStableJumpImpulse: CGFloat = 40.0
+    // Calibrated to match PC jump apex under current SpriteKit gravity.
+    private let spriteKitStableJumpImpulse: CGFloat = 76.0
     private let pcAccelPerFrame: CGFloat = 0.4
     private let pcDecelPerFrame: CGFloat = 0.25
     private let pcMaxRunSpeedPerFrame: CGFloat = 3.2
@@ -278,9 +279,12 @@ final class SpriteKitGameScene: SKScene {
         var flags: UInt8 = 0
         if onGround { flags |= 0b0001 }
         if !onGround { flags |= 0b0010 }
+        // Match PC/Server coordinate semantics: publish top-left sprite origin.
+        let topLeftX = localPlayer.position.x - localPlayer.size.width * 0.5
+        let topLeftYInScene = localPlayer.position.y + localPlayer.size.height * 0.5
         let state = PlayerState(
-            x: localPlayer.position.x,
-            y: toServerY(localPlayer.position.y),
+            x: topLeftX,
+            y: toServerY(topLeftYInScene),
             vx: vx / 60,
             vy: -(vy / 60),
             flags: flags,

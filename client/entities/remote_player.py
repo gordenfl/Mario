@@ -32,10 +32,10 @@ class RemotePlayer:
             sprite_collection["mario_big_idle"].image,
             sprite_collection["mario_big_jump"].image,
         )
-        self.current_animation = self.small_animation
+        self.current_animation = self.big_animation
         self.heading = 1
         self.color = color
-        self.rect = pygame.Rect(0, 0, 32, 48)
+        self.rect = pygame.Rect(0, 0, 32, 64)
         self.visible = False
         self.is_dying = False
         self.death_timer = 0
@@ -43,6 +43,7 @@ class RemotePlayer:
         self.hurt_timer = 0
         self.last_udp_timestamp = 0
         self.last_udp_monotonic = 0.0
+        self.force_big_mario = True
         self.state = {
             "position": [0, 0],
             "velocity": [0, 0],
@@ -67,19 +68,23 @@ class RemotePlayer:
         death_timer = state.get("death_timer", 0)
         if dying:
             if not self.is_dying:
-                self.current_animation = self.small_animation
+                self.current_animation = self.big_animation if self.force_big_mario else self.small_animation
                 self.current_animation.inAir()
             self.is_dying = True
             self.death_timer = death_timer
             self.heading = 0
-            self.rect.height = 48
+            self.rect.height = 64 if self.force_big_mario else 48
         else:
             self.is_dying = False
             self.death_timer = 0
 
         power = self.state.get("power", 0)
         if not self.is_dying:
-            if power >= 1:
+            if self.force_big_mario:
+                if self.current_animation is not self.big_animation:
+                    self.current_animation = self.big_animation
+                self.rect.height = 64
+            elif power >= 1:
                 if self.current_animation is not self.big_animation:
                     self.current_animation = self.big_animation
                 self.rect.height = 64
@@ -179,7 +184,7 @@ class RemotePlayer:
                 heading = self.heading
         self.heading = heading
         if on_ground is None:
-            on_ground = abs(vy) < 0.1
+            on_ground = abs(vy) < 0.8 and abs(dy) < 1.5
         if self.is_dying:
             self.current_animation.inAir()
         else:
