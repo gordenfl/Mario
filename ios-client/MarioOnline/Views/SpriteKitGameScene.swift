@@ -4,13 +4,24 @@ import UIKit
 final class SpriteKitGameScene: SKScene {
     private let tileSize: CGFloat = 32
     private let mapRows = 16
-    private let playerSize = CGSize(width: 26, height: 30)
+    private let serverCoordinateHeight: CGFloat = 480
+    private let remoteRenderYOffset: CGFloat = 24
+    private let cloudRenderYOffset: CGFloat = -14
+    private let bushRenderYOffset: CGFloat = -10
+    private let playerSize = CGSize(width: 26, height: 58)
     private let worldNode = SKNode()
     private let backgroundNode = SKNode()
     private let cameraAnchor = SKCameraNode()
     private let hudNode = SKNode()
+    private let hudMarioLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+    private let hudScoreLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+    private let hudCoinLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+    private let hudWorldLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+    private let hudWorldValueLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+    private let hudTimeLabel = SKLabelNode(fontNamed: "Menlo-Bold")
     private let hudHpLabel = SKLabelNode(fontNamed: "Menlo-Bold")
-    private let hudPosLabel = SKLabelNode(fontNamed: "Menlo")
+    private let hudHpBarBg = SKShapeNode(rectOf: CGSize(width: 134, height: 12), cornerRadius: 3)
+    private let hudHpBarFill = SKShapeNode(rectOf: CGSize(width: 130, height: 8), cornerRadius: 2)
     private let localPlayer = SKSpriteNode(color: .red, size: CGSize(width: 26, height: 30))
     private var remotePlayers: [Int: SKSpriteNode] = [:]
     private var drops: [String: SKSpriteNode] = [:]
@@ -31,8 +42,11 @@ final class SpriteKitGameScene: SKScene {
     private var localAnimTextures: [AnimState: [SKTexture]] = [:]
     private var currentAnimState: AnimState?
     private let animActionKey = "mario_anim"
+    private let remoteAnimActionKey = "remote_anim"
     private var fallbackTinted = false
     private var localAnimState: AnimState = .idle
+    private var remoteAnimStates: [Int: AnimState] = [:]
+    private var remoteFacing: [Int: Int8] = [:]
     private var hitFlashUntil: TimeInterval = 0
     private var jumpQueued = false
     private var jumpBufferFrames = 0
@@ -83,10 +97,13 @@ final class SpriteKitGameScene: SKScene {
         for id in remotePlayers.keys where !keys.contains(id) {
             remotePlayers[id]?.removeFromParent()
             remotePlayers.removeValue(forKey: id)
+            remoteAnimStates.removeValue(forKey: id)
+            remoteFacing.removeValue(forKey: id)
         }
         for (id, state) in states {
             let node = remotePlayers[id] ?? makeRemoteNode(id: id)
-            node.position = CGPoint(x: CGFloat(state.x), y: CGFloat(state.y))
+            node.position = CGPoint(x: CGFloat(state.x), y: fromServerY(state.y) - remoteRenderYOffset)
+            applyRemoteAnimation(for: node, id: id, state: state)
         }
     }
 
@@ -113,7 +130,7 @@ final class SpriteKitGameScene: SKScene {
         }
         for (id, state) in states {
             let node = projectiles[id] ?? makeProjectileNode(id: id)
-            node.position = CGPoint(x: CGFloat(state.x), y: CGFloat(state.y))
+            node.position = CGPoint(x: CGFloat(state.x), y: fromServerY(state.y))
         }
     }
 
@@ -161,7 +178,9 @@ final class SpriteKitGameScene: SKScene {
     private func setupLocalPlayer() {
         if let first = localAnimTextures[.idle]?.first {
             localPlayer.texture = first
-            localPlayer.size = CGSize(width: first.size().width * 1.8, height: first.size().height * 1.8)
+            localPlayer.size = CGSize(width: first.size().width * 2.0, height: first.size().height * 2.0)
+        } else {
+            localPlayer.size = playerSize
         }
         localPlayer.position = CGPoint(x: 48, y: tileToWorld(x: 0, y: 11).y)
         localPlayer.physicsBody = SKPhysicsBody(rectangleOf: playerSize)
@@ -225,14 +244,18 @@ final class SpriteKitGameScene: SKScene {
         if !onGround { flags |= 0b0010 }
         let state = PlayerState(
             x: localPlayer.position.x,
-            y: localPlayer.position.y,
+            y: toServerY(localPlayer.position.y),
             vx: vx / 60,
-            vy: vy / 60,
+            vy: -(vy / 60),
             flags: flags,
             heading: heading
         )
-        hudHpLabel.text = "HP 30/30"
-        hudPosLabel.text = "X \(Int(localPlayer.position.x))  Y \(Int(localPlayer.position.y))"
+        hudScoreLabel.text = "MARIO"
+        hudCoinLabel.text = "o x\(max(0, Int(localPlayer.position.x) / 120))"
+        hudWorldLabel.text = "WORLD"
+        hudWorldValueLabel.text = "1-1"
+        hudTimeLabel.text = "TIME"
+        hudHpLabel.text = "30/30"
         onLocalState?(state)
     }
 
@@ -382,12 +405,62 @@ final class SpriteKitGameScene: SKScene {
     }
 
     private func makeRemoteNode(id: Int) -> SKSpriteNode {
-        let node = SKSpriteNode(color: .systemBlue, size: playerSize)
+        let node = SKSpriteNode(texture: localAnimTextures[.idle]?.first, color: .clear, size: localPlayer.size)
         node.name = "remote_\(id)"
+        node.colorBlendFactor = 0.0
+        node.alpha = 1.0
         node.zPosition = 25
         worldNode.addChild(node)
         remotePlayers[id] = node
         return node
+    }
+
+    private func applyRemoteAnimation(for node: SKSpriteNode, id: Int, state: PlayerState) {
+        let vx = abs(state.vx * 60)
+        let vy = state.vy * 60
+        let onGround = (state.flags & 0b0001) != 0 || abs(vy) < 18
+        let moving = vx > 20
+        let nextState: AnimState
+        if !onGround && vy > 70 {
+            nextState = .jump
+        } else if !onGround && vy < -70 {
+            nextState = .fall
+        } else if moving {
+            nextState = .run
+        } else {
+            nextState = .idle
+        }
+
+        // Avoid left-right flicker while idle: only change facing on meaningful movement
+        // or when we receive a stable non-zero heading.
+        var facing = remoteFacing[id] ?? 1
+        if moving {
+            if state.vx > 0.02 {
+                facing = 1
+            } else if state.vx < -0.02 {
+                facing = -1
+            } else if state.heading != 0 {
+                facing = state.heading > 0 ? 1 : -1
+            }
+        } else if state.heading != 0 && abs(state.vx) > 0.005 {
+            facing = state.heading > 0 ? 1 : -1
+        }
+        remoteFacing[id] = facing
+        node.xScale = facing >= 0 ? abs(node.xScale) : -abs(node.xScale)
+
+        guard remoteAnimStates[id] != nextState else { return }
+        remoteAnimStates[id] = nextState
+        node.removeAction(forKey: remoteAnimActionKey)
+
+        guard let textures = localAnimTextures[nextState], !textures.isEmpty else { return }
+        if textures.count == 1 {
+            node.texture = textures[0]
+            return
+        }
+
+        let frameTime: TimeInterval = nextState == .run ? 0.14 : 0.16
+        let action = SKAction.repeatForever(.animate(with: textures, timePerFrame: frameTime, resize: false, restore: true))
+        node.run(action, withKey: remoteAnimActionKey)
     }
 
     private func makeProjectileNode(id: Int) -> SKSpriteNode {
@@ -432,7 +505,8 @@ final class SpriteKitGameScene: SKScene {
             for colOffset in 0..<3 {
                 guard let tex = tileTexture(tileX: colOffset, tileY: 20 + rowOffset, sheetTile: 16) else { continue }
                 let node = SKSpriteNode(texture: tex, size: CGSize(width: tileSize, height: tileSize))
-                node.position = tileToWorld(x: x + colOffset, y: y + rowOffset)
+                let base = tileToWorld(x: x + colOffset, y: y + rowOffset)
+                node.position = CGPoint(x: base.x, y: base.y + cloudRenderYOffset)
                 node.zPosition = -80
                 node.alpha = 0.95
                 backgroundNode.addChild(node)
@@ -444,7 +518,8 @@ final class SpriteKitGameScene: SKScene {
         for colOffset in 0..<3 {
             guard let tex = tileTexture(tileX: 11 + colOffset, tileY: 11, sheetTile: 16) else { continue }
             let node = SKSpriteNode(texture: tex, size: CGSize(width: tileSize, height: tileSize))
-            node.position = tileToWorld(x: x + colOffset, y: y)
+            let base = tileToWorld(x: x + colOffset, y: y)
+            node.position = CGPoint(x: base.x, y: base.y + bushRenderYOffset)
             node.zPosition = -70
             backgroundNode.addChild(node)
         }
@@ -453,44 +528,74 @@ final class SpriteKitGameScene: SKScene {
         hudNode.removeAllChildren()
         hudNode.zPosition = 999
         cameraAnchor.addChild(hudNode)
+        let leftX = -size.width * 0.5 + 34
+        let topY = size.height * 0.5 - 16
+        let centerX = -24.0
+        let rightX = size.width * 0.5 - 170
 
-        hudHpLabel.fontSize = 13
-        hudHpLabel.fontColor = .white
-        hudHpLabel.horizontalAlignmentMode = .left
-        hudHpLabel.verticalAlignmentMode = .top
-        hudHpLabel.position = CGPoint(x: -160, y: 105)
-        hudHpLabel.text = "HP 30/30"
-        hudNode.addChild(hudHpLabel)
+        for label in [hudMarioLabel, hudScoreLabel, hudCoinLabel, hudWorldLabel, hudWorldValueLabel, hudTimeLabel, hudHpLabel] {
+            label.fontSize = 16
+            label.fontColor = .white
+            label.horizontalAlignmentMode = .left
+            label.verticalAlignmentMode = .top
+            hudNode.addChild(label)
+        }
 
-        hudPosLabel.fontSize = 11
-        hudPosLabel.fontColor = .white
-        hudPosLabel.horizontalAlignmentMode = .left
-        hudPosLabel.verticalAlignmentMode = .top
-        hudPosLabel.position = CGPoint(x: -160, y: 86)
-        hudPosLabel.text = "X 0  Y 0"
-        hudNode.addChild(hudPosLabel)
+        hudMarioLabel.position = CGPoint(x: leftX, y: topY)
+        hudMarioLabel.text = "MARIO"
+        hudScoreLabel.position = CGPoint(x: leftX, y: topY - 24)
+        hudScoreLabel.text = "M000000"
+
+        hudCoinLabel.position = CGPoint(x: leftX + 96, y: topY - 24)
+        hudCoinLabel.text = "o x00"
+
+        hudWorldLabel.position = CGPoint(x: centerX, y: topY)
+        hudWorldLabel.text = "WORLD"
+        hudWorldValueLabel.position = CGPoint(x: centerX + 21, y: topY - 22)
+        hudWorldValueLabel.text = "1-1"
+
+        hudTimeLabel.position = CGPoint(x: rightX, y: topY)
+        hudTimeLabel.text = "TIME"
+
+        hudHpBarBg.fillColor = .black
+        hudHpBarBg.strokeColor = .white
+        hudHpBarBg.lineWidth = 1
+        hudHpBarBg.position = CGPoint(x: leftX + 72, y: topY - 42)
+        hudNode.addChild(hudHpBarBg)
+
+        hudHpBarFill.fillColor = SKColor(red: 0.86, green: 0.08, blue: 0.08, alpha: 1.0)
+        hudHpBarFill.strokeColor = .clear
+        hudHpBarFill.position = CGPoint(x: leftX + 72, y: topY - 42)
+        hudNode.addChild(hudHpBarFill)
+
+        hudHpLabel.fontSize = 14
+        hudHpLabel.position = CGPoint(x: leftX + 145, y: topY - 34)
+        hudHpLabel.text = "30/30"
     }
 
     private func configureAnimationFrames() {
-        // Preferred source: Xcode Sprite Atlas named "MarioFrames.atlas"
+        localAnimTextures.removeAll()
+
+        // Match PC client big form: use mario_big_* frames from characters sheet.
+        if let sheet = UIImage(named: "characters")?.cgImage {
+            let idle = cropTexture(from: sheet, x: 259, y: 1, width: 16, height: 32)
+            let run1 = cropTexture(from: sheet, x: 296, y: 1, width: 16, height: 32)
+            let run2 = cropTexture(from: sheet, x: 315, y: 1, width: 16, height: 32)
+            let run3 = cropTexture(from: sheet, x: 332, y: 1, width: 16, height: 32)
+            let jump = cropTexture(from: sheet, x: 369, y: 1, width: 16, height: 32)
+            localAnimTextures[.idle] = [idle]
+            localAnimTextures[.run] = [run1, run2, run3]
+            localAnimTextures[.jump] = [jump]
+            localAnimTextures[.fall] = [jump]
+            return
+        }
+
+        // Fallback only when characters sheet is unavailable.
         if let atlas = tryLoadAtlas(named: "MarioFrames") {
             localAnimTextures[.idle] = textures(in: atlas, prefix: "mario_idle_")
             localAnimTextures[.run] = textures(in: atlas, prefix: "mario_run_")
             localAnimTextures[.jump] = textures(in: atlas, prefix: "mario_jump_")
             localAnimTextures[.fall] = textures(in: atlas, prefix: "mario_fall_")
-        }
-
-        // Optional fallback source: single spritesheet image named "characters"
-        if localAnimTextures.isEmpty, let sheet = UIImage(named: "characters")?.cgImage {
-            let idle = cropTexture(from: sheet, x: 276, y: 44, width: 16, height: 16)
-            let run1 = cropTexture(from: sheet, x: 290, y: 44, width: 16, height: 16)
-            let run2 = cropTexture(from: sheet, x: 304, y: 44, width: 16, height: 16)
-            let run3 = cropTexture(from: sheet, x: 321, y: 44, width: 16, height: 16)
-            let jump = cropTexture(from: sheet, x: 355, y: 44, width: 16, height: 16)
-            localAnimTextures[.idle] = [idle]
-            localAnimTextures[.run] = [run1, run2, run3]
-            localAnimTextures[.jump] = [jump]
-            localAnimTextures[.fall] = [jump]
         }
     }
 
@@ -526,21 +631,35 @@ final class SpriteKitGameScene: SKScene {
         atlas.textureNames
             .filter { $0.hasPrefix(prefix) }
             .sorted()
-            .map { atlas.textureNamed($0) }
+            .map { pixelTexture(atlas.textureNamed($0)) }
     }
 
     private func cropTexture(from sheet: CGImage, x: Int, y: Int, width: Int, height: Int) -> SKTexture {
         let rect = CGRect(x: x, y: y, width: width, height: height)
         let cropped = sheet.cropping(to: rect) ?? sheet
         let ui = UIImage(cgImage: cropped)
-        return SKTexture(image: ui)
+        return pixelTexture(SKTexture(image: ui))
     }
 
     private func tileTexture(tileX: Int, tileY: Int, sheetTile: Int) -> SKTexture? {
         guard let sheet = tileSheet else { return nil }
         let px = tileX * sheetTile
         let py = tileY * sheetTile
-        return SKTexture(image: UIImage(cgImage: sheet.cropping(to: CGRect(x: px, y: py, width: sheetTile, height: sheetTile)) ?? sheet))
+        let texture = SKTexture(image: UIImage(cgImage: sheet.cropping(to: CGRect(x: px, y: py, width: sheetTile, height: sheetTile)) ?? sheet))
+        return pixelTexture(texture)
+    }
+
+    private func pixelTexture(_ texture: SKTexture) -> SKTexture {
+        texture.filteringMode = .nearest
+        return texture
+    }
+
+    private func fromServerY(_ y: Double) -> CGFloat {
+        serverCoordinateHeight - CGFloat(y)
+    }
+
+    private func toServerY(_ y: CGFloat) -> Double {
+        Double(serverCoordinateHeight - y)
     }
 
     private func makeTileNode(kind: TileKind, x: Int, y: Int) -> SKSpriteNode {

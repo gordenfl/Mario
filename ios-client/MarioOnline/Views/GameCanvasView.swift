@@ -1,39 +1,15 @@
 import SwiftUI
 import SpriteKit
+import UIKit
 
 struct GameCanvasView: View {
     @EnvironmentObject private var viewModel: GameViewModel
-    @State private var scene = SpriteKitGameScene(size: CGSize(width: 960, height: 540))
+    @State private var scene = SpriteKitGameScene(size: CGSize(width: 854, height: 480))
 
     var body: some View {
-        VStack(spacing: 14) {
-            Text("游戏中")
-                .font(.headline)
-                .foregroundStyle(.white)
-
-            GeometryReader { proxy in
-                let width = proxy.size.width
-                let height = min(proxy.size.height, width * 9.0 / 16.0)
-                SpriteView(scene: scene)
-                    .frame(width: width, height: height)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            }
-            .frame(height: 280)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.white.opacity(0.25), lineWidth: 1)
-            }
-            .overlay(alignment: .topTrailing) {
-                Text("16:9 横版")
-                    .font(.caption2)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.black.opacity(0.5))
-                    .foregroundStyle(.white)
-                    .clipShape(Capsule())
-                    .padding(8)
-            }
+        ZStack {
+            SpriteView(scene: scene)
+                .ignoresSafeArea()
             .onAppear {
                 configureScene()
             }
@@ -49,46 +25,20 @@ struct GameCanvasView: View {
             .onChange(of: viewModel.brokenTiles) { (broken: Set<String>) in
                 scene.applyBrokenTiles(broken)
             }
-
-            HStack(spacing: 20) {
-                holdButton("←", onPress: {
-                    viewModel.setMove(left: true)
-                }, onRelease: {
-                    viewModel.setMove(left: false)
-                })
-
-                Button("发射") { viewModel.fire() }
-                    .buttonStyle(.bordered)
-
-                Button("跳跃") { scene.triggerJump() }
-                    .buttonStyle(.borderedProminent)
-
-                holdButton("→", onPress: {
-                    viewModel.setMove(right: true)
-                }, onRelease: {
-                    viewModel.setMove(right: false)
-                })
+            .overlay {
+                KeyboardInputCaptureView(
+                    onMoveLeftChanged: { pressed in viewModel.setMove(left: pressed) },
+                    onMoveRightChanged: { pressed in viewModel.setMove(right: pressed) },
+                    onJump: { scene.triggerJump() },
+                    onFire: { viewModel.fire() }
+                )
+                .allowsHitTesting(false)
             }
-            .padding(.vertical, 6)
-            .padding(.horizontal, 10)
-            .background(.ultraThinMaterial.opacity(0.7))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-
-            Button("退出房间") { viewModel.leaveRoom() }
-                .buttonStyle(.bordered)
         }
-        .padding()
-        .background(
-            LinearGradient(
-                colors: [Color(red: 0.08, green: 0.1, blue: 0.2), Color(red: 0.13, green: 0.18, blue: 0.3)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
     }
 
     private func configureScene() {
-        scene.scaleMode = SKSceneScaleMode.resizeFill
+        scene.scaleMode = SKSceneScaleMode.aspectFill
         scene.setLocalClientId(viewModel.localClientIdentifier())
         scene.onLocalState = { (state: PlayerState) in
             Task { @MainActor in
@@ -127,18 +77,86 @@ struct GameCanvasView: View {
         scene.syncProjectiles(viewModel.projectiles)
         scene.applyBrokenTiles(viewModel.brokenTiles)
     }
+}
 
-    private func holdButton(_ title: String, onPress: @escaping () -> Void, onRelease: @escaping () -> Void) -> some View {
-        Text(title)
-            .font(.title2)
-            .frame(width: 56, height: 44)
-            .background(.blue.opacity(0.85))
-            .foregroundStyle(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in onPress() }
-                    .onEnded { _ in onRelease() }
-            )
+private struct KeyboardInputCaptureView: UIViewRepresentable {
+    let onMoveLeftChanged: (Bool) -> Void
+    let onMoveRightChanged: (Bool) -> Void
+    let onJump: () -> Void
+    let onFire: () -> Void
+
+    func makeUIView(context: Context) -> KeyboardInputUIView {
+        let view = KeyboardInputUIView()
+        view.onMoveLeftChanged = onMoveLeftChanged
+        view.onMoveRightChanged = onMoveRightChanged
+        view.onJump = onJump
+        view.onFire = onFire
+        DispatchQueue.main.async {
+            _ = view.becomeFirstResponder()
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: KeyboardInputUIView, context: Context) {
+        uiView.onMoveLeftChanged = onMoveLeftChanged
+        uiView.onMoveRightChanged = onMoveRightChanged
+        uiView.onJump = onJump
+        uiView.onFire = onFire
+    }
+}
+
+private final class KeyboardInputUIView: UIView {
+    var onMoveLeftChanged: ((Bool) -> Void)?
+    var onMoveRightChanged: ((Bool) -> Void)?
+    var onJump: (() -> Void)?
+    var onFire: (() -> Void)?
+
+    override var canBecomeFirstResponder: Bool { true }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        DispatchQueue.main.async { [weak self] in
+            _ = self?.becomeFirstResponder()
+        }
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        for press in presses {
+            guard let key = press.key else { continue }
+            switch key.keyCode {
+            case .keyboardLeftArrow:
+                onMoveLeftChanged?(true)
+            case .keyboardRightArrow:
+                onMoveRightChanged?(true)
+            case .keyboardUpArrow, .keyboardSpacebar:
+                onJump?()
+            case .keyboardF:
+                onFire?()
+            default:
+                break
+            }
+        }
+        super.pressesBegan(presses, with: event)
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        for press in presses {
+            guard let key = press.key else { continue }
+            switch key.keyCode {
+            case .keyboardLeftArrow:
+                onMoveLeftChanged?(false)
+            case .keyboardRightArrow:
+                onMoveRightChanged?(false)
+            default:
+                break
+            }
+        }
+        super.pressesEnded(presses, with: event)
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        onMoveLeftChanged?(false)
+        onMoveRightChanged?(false)
+        super.pressesCancelled(presses, with: event)
     }
 }

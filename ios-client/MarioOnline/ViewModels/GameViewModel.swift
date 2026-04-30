@@ -18,7 +18,7 @@ final class GameViewModel: ObservableObject {
         case game
     }
 
-    @Published var screen: Screen = .game
+    @Published var screen: Screen = .login
     @Published var host: String = "127.0.0.1"
     @Published var portText: String = "8765"
     @Published var username: String = ""
@@ -40,7 +40,9 @@ final class GameViewModel: ObservableObject {
     private var localUdpClientId: Int?
     private var clientIdToUsername: [Int: String] = [:]
     private var pendingProjectilePackets: [Int: ProjectileStateModel] = [:]
-    private var offlineDemoMode = true
+    private var remoteLastUdpAt: [Int: TimeInterval] = [:]
+    private let snapshotSuppressionWindow: TimeInterval = 0.35
+    private var offlineDemoMode = false
     private var offlineProjectileCounter = 0
 
     init() {
@@ -246,7 +248,9 @@ final class GameViewModel: ObservableObject {
         case GameProtocol.msgPlayerState:
             guard let state = GameProtocol.unpackPlayerState(payload) else { return }
             if Int(clientId) != localUdpClientId {
-                remotePlayers[Int(clientId)] = state
+                let id = Int(clientId)
+                remotePlayers[id] = state
+                remoteLastUdpAt[id] = ProcessInfo.processInfo.systemUptime
             }
         case GameProtocol.msgProjectileState:
             guard let projectile = GameProtocol.unpackProjectileState(payload, ownerClientId: Int(clientId)) else { return }
@@ -281,6 +285,7 @@ final class GameViewModel: ObservableObject {
         screen = .game
         localPlayer = PlayerState()
         remotePlayers = [:]
+        remoteLastUdpAt = [:]
         drops = [:]
         projectiles = [:]
         brokenTiles = []
@@ -304,6 +309,7 @@ final class GameViewModel: ObservableObject {
 
     private func applySnapshot(_ message: [String: Any]) {
         guard let players = message["players"] as? [[String: Any]] else { return }
+        let now = ProcessInfo.processInfo.systemUptime
         for p in players {
             guard let clientId = p["client_id"] as? Int else { continue }
             if let username = p["username"] as? String {
@@ -316,6 +322,10 @@ final class GameViewModel: ObservableObject {
             let flags = UInt8((p["flags"] as? Int) ?? 0)
             let heading = Int8((p["heading"] as? Int) ?? 1)
             if clientId != localUdpClientId {
+                if let lastUdpAt = remoteLastUdpAt[clientId], now - lastUdpAt < snapshotSuppressionWindow {
+                    // UDP is fresher for movement; avoid air-time flicker from stale TCP snapshots.
+                    continue
+                }
                 remotePlayers[clientId] = PlayerState(x: x, y: y, vx: vx, vy: vy, flags: flags, heading: heading)
             }
         }
