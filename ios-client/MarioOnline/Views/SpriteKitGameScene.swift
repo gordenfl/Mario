@@ -2,10 +2,21 @@ import SpriteKit
 import UIKit
 
 final class SpriteKitGameScene: SKScene {
+    // PC baseline constants (client/traits/go.py, jump.py, classes/Camera.py, sprites/Mario.json)
+    private let logicFps: CGFloat = 60
     private let tileSize: CGFloat = 32
     private let mapRows = 16
     private let serverCoordinateHeight: CGFloat = 480
-    private let remoteRenderYOffset: CGFloat = 24
+    private let smallMarioScale: CGFloat = 2.0
+    private let bigMarioScale: CGFloat = 2.0
+    private let pcGravityPerFrame: CGFloat = 0.8
+    private let pcJumpVelocityPerFrame: CGFloat = 12.0
+    private let spriteKitStableGravity: CGFloat = 24.0
+    private let spriteKitStableJumpImpulse: CGFloat = 40.0
+    private let pcAccelPerFrame: CGFloat = 0.4
+    private let pcDecelPerFrame: CGFloat = 0.25
+    private let pcMaxRunSpeedPerFrame: CGFloat = 3.2
+    private let sceneDownShiftPx: CGFloat = 16
     private let cloudRenderYOffset: CGFloat = -14
     private let bushRenderYOffset: CGFloat = -10
     private let playerSize = CGSize(width: 26, height: 58)
@@ -50,6 +61,7 @@ final class SpriteKitGameScene: SKScene {
     private var hitFlashUntil: TimeInterval = 0
     private var jumpQueued = false
     private var jumpBufferFrames = 0
+    private var horizontalVelocity: CGFloat = 0
 
     private enum AnimState {
         case idle
@@ -102,7 +114,14 @@ final class SpriteKitGameScene: SKScene {
         }
         for (id, state) in states {
             let node = remotePlayers[id] ?? makeRemoteNode(id: id)
-            node.position = CGPoint(x: CGFloat(state.x), y: fromServerY(state.y) - remoteRenderYOffset)
+            // Server/PC uses top-left style coordinates; SpriteKit positions by center.
+            // Convert remote position to center anchor to keep feet on the same ground line.
+            let anchorXOffset = node.size.width * 0.5
+            let anchorYOffset = node.size.height * 0.5
+            node.position = CGPoint(
+                x: CGFloat(state.x) + anchorXOffset,
+                y: fromServerY(state.y) - anchorYOffset
+            )
             applyRemoteAnimation(for: node, id: id, state: state)
         }
     }
@@ -176,9 +195,10 @@ final class SpriteKitGameScene: SKScene {
     }
 
     private func setupLocalPlayer() {
+        let marioScale = bigMarioScale
         if let first = localAnimTextures[.idle]?.first {
             localPlayer.texture = first
-            localPlayer.size = CGSize(width: first.size().width * 2.0, height: first.size().height * 2.0)
+            localPlayer.size = CGSize(width: first.size().width * marioScale, height: first.size().height * marioScale)
         } else {
             localPlayer.size = playerSize
         }
@@ -190,23 +210,35 @@ final class SpriteKitGameScene: SKScene {
         localPlayer.physicsBody?.linearDamping = 1.0
         localPlayer.physicsBody?.affectedByGravity = true
         worldNode.addChild(localPlayer)
-        physicsWorld.gravity = CGVector(dx: 0, dy: -24)
+        // Stable SpriteKit gravity tuned to current collision model.
+        physicsWorld.gravity = CGVector(dx: 0, dy: -spriteKitStableGravity)
     }
 
     private func applyInput() {
-        var vx: CGFloat = 0
+        let accelPerTickSpeed = pcAccelPerFrame * logicFps
+        let decelPerTickSpeed = pcDecelPerFrame * logicFps
+        let maxRunSpeedPerSecond = pcMaxRunSpeedPerFrame * logicFps
+
         if leftPressed {
-            vx -= 180
+            horizontalVelocity -= accelPerTickSpeed
             heading = -1
         }
         if rightPressed {
-            vx += 180
+            horizontalVelocity += accelPerTickSpeed
             heading = 1
         }
-        localPlayer.physicsBody?.velocity.dx = vx
+        if !leftPressed && !rightPressed {
+            if horizontalVelocity > 0 {
+                horizontalVelocity = max(0, horizontalVelocity - decelPerTickSpeed)
+            } else if horizontalVelocity < 0 {
+                horizontalVelocity = min(0, horizontalVelocity + decelPerTickSpeed)
+            }
+        }
+        horizontalVelocity = min(max(horizontalVelocity, -maxRunSpeedPerSecond), maxRunSpeedPerSecond)
+        localPlayer.physicsBody?.velocity.dx = horizontalVelocity
         if jumpQueued || jumpBufferFrames > 0 {
             if isPlayerGrounded() {
-                localPlayer.physicsBody?.applyImpulse(CGVector(dx: 0, dy: 40))
+                localPlayer.physicsBody?.applyImpulse(CGVector(dx: 0, dy: spriteKitStableJumpImpulse))
                 jumpQueued = false
                 jumpBufferFrames = 0
             } else {
@@ -220,25 +252,29 @@ final class SpriteKitGameScene: SKScene {
         let maxX = worldWidth - playerSize.width / 2
         if localPlayer.position.x < minX {
             localPlayer.position.x = minX
+            horizontalVelocity = max(0, horizontalVelocity)
         }
         if localPlayer.position.x > maxX {
             localPlayer.position.x = maxX
+            horizontalVelocity = min(0, horizontalVelocity)
         }
     }
 
     private func updateCamera() {
         let half = size.width / 2
-        let deadZone: CGFloat = 84
+        // PC camera keeps Mario near half viewport width.
+        let deadZone = tileSize * 2.625
         let targetX = localPlayer.position.x + CGFloat(heading) * deadZone
         let clampedX = min(max(targetX, half), max(half, worldWidth - half))
         let smoothed = cameraAnchor.position.x + (clampedX - cameraAnchor.position.x) * 0.14
-        cameraAnchor.position = CGPoint(x: smoothed, y: 185)
+        let cameraY = tileSize * 5.78 + sceneDownShiftPx
+        cameraAnchor.position = CGPoint(x: smoothed, y: cameraY)
     }
 
     private func publishLocalState() {
         let vy = localPlayer.physicsBody?.velocity.dy ?? 0
         let vx = localPlayer.physicsBody?.velocity.dx ?? 0
-        let onGround = abs(vy) < 2.5
+        let onGround = abs(vy) < (pcGravityPerFrame * logicFps * 0.2)
         var flags: UInt8 = 0
         if onGround { flags |= 0b0001 }
         if !onGround { flags |= 0b0010 }
@@ -279,16 +315,18 @@ final class SpriteKitGameScene: SKScene {
     }
 
     private func updateDrops(delta: TimeInterval) {
-        let speed: CGFloat = 80 * CGFloat(delta)
+        let dropSpeedPerSecond = tileSize * 2.5
+        let speed: CGFloat = dropSpeedPerSecond * CGFloat(delta)
         for (id, node) in drops {
             let direction = dropDirections[id, default: 1]
             node.position.x += CGFloat(direction) * speed
-            if node.position.x < 24 {
-                node.position.x = 24
+            let horizontalPadding = tileSize * 0.75
+            if node.position.x < horizontalPadding {
+                node.position.x = horizontalPadding
                 dropDirections[id] = 1
             }
-            if node.position.x > worldWidth - 24 {
-                node.position.x = worldWidth - 24
+            if node.position.x > worldWidth - horizontalPadding {
+                node.position.x = worldWidth - horizontalPadding
                 dropDirections[id] = -1
             }
         }
@@ -297,17 +335,18 @@ final class SpriteKitGameScene: SKScene {
     private func updateAnimations(currentTime: TimeInterval) {
         let vx = abs(localPlayer.physicsBody?.velocity.dx ?? 0)
         let vy = localPlayer.physicsBody?.velocity.dy ?? 0
-        let onGround = abs(vy) < 22
+        let onGroundThreshold = pcGravityPerFrame * logicFps
+        let onGround = abs(vy) < onGroundThreshold
         let movingIntent = leftPressed || rightPressed
-        let standingLock = !movingIntent && vx < 18 && abs(vy) < 80
+        let standingLock = !movingIntent && vx < (pcAccelPerFrame * logicFps) && abs(vy) < (onGroundThreshold * 3.5)
         let nextState: AnimState
         if standingLock {
             nextState = .idle
-        } else if !onGround && vy > 90 {
+        } else if !onGround && vy > (pcJumpVelocityPerFrame * logicFps * 0.35) {
             nextState = .jump
-        } else if !onGround && vy < -90 {
+        } else if !onGround && vy < -(pcJumpVelocityPerFrame * logicFps * 0.35) {
             nextState = .fall
-        } else if movingIntent && vx > 22 {
+        } else if movingIntent && vx > (pcAccelPerFrame * logicFps * 1.1) {
             nextState = .run
         } else {
             nextState = .idle
@@ -343,9 +382,11 @@ final class SpriteKitGameScene: SKScene {
 
     private func detectTileBreak() {
         let vy = localPlayer.physicsBody?.velocity.dy ?? 0
-        guard vy > 30 else { return }
+        let upwardBreakThreshold = pcAccelPerFrame * logicFps * 1.25
+        guard vy > upwardBreakThreshold else { return }
         let headX = Int(localPlayer.position.x / tileSize)
-        let headY = mapRows - 1 - Int((localPlayer.position.y + playerSize.height / 2 + 4) / tileSize)
+        let headProbeOffset = tileSize * 0.125
+        let headY = mapRows - 1 - Int((localPlayer.position.y + playerSize.height / 2 + headProbeOffset) / tileSize)
         let key = "\(headX):\(headY)"
         guard breakableTiles.contains(key), let node = solidTiles[key] else { return }
         node.removeFromParent()
@@ -418,12 +459,13 @@ final class SpriteKitGameScene: SKScene {
     private func applyRemoteAnimation(for node: SKSpriteNode, id: Int, state: PlayerState) {
         let vx = abs(state.vx * 60)
         let vy = state.vy * 60
-        let onGround = (state.flags & 0b0001) != 0 || abs(vy) < 18
-        let moving = vx > 20
+        let onGroundThreshold = pcGravityPerFrame * logicFps
+        let onGround = (state.flags & 0b0001) != 0 || abs(vy) < onGroundThreshold
+        let moving = vx > (pcAccelPerFrame * logicFps)
         let nextState: AnimState
-        if !onGround && vy > 70 {
+        if !onGround && vy > (pcJumpVelocityPerFrame * logicFps * 0.35) {
             nextState = .jump
-        } else if !onGround && vy < -70 {
+        } else if !onGround && vy < -(pcJumpVelocityPerFrame * logicFps * 0.35) {
             nextState = .fall
         } else if moving {
             nextState = .run
@@ -458,7 +500,7 @@ final class SpriteKitGameScene: SKScene {
             return
         }
 
-        let frameTime: TimeInterval = nextState == .run ? 0.14 : 0.16
+        let frameTime: TimeInterval = nextState == .run ? TimeInterval(7.0 / logicFps) : TimeInterval(8.0 / logicFps)
         let action = SKAction.repeatForever(.animate(with: textures, timePerFrame: frameTime, resize: false, restore: true))
         node.run(action, withKey: remoteAnimActionKey)
     }
@@ -474,8 +516,9 @@ final class SpriteKitGameScene: SKScene {
 
     private func makeDropNode(id: String, type: String) -> SKSpriteNode {
         let color: SKColor = type == "mushroom" ? .systemPink : .yellow
-        let node = SKSpriteNode(color: color, size: CGSize(width: 18, height: 18))
-        node.position.y = tileToWorld(x: 0, y: 9).y + 100
+        let dropSize = tileSize * 0.56
+        let node = SKSpriteNode(color: color, size: CGSize(width: dropSize, height: dropSize))
+        node.position.y = tileToWorld(x: 0, y: 9).y + tileSize * 3.125
         node.name = "drop_\(id)"
         node.zPosition = 28
         worldNode.addChild(node)
@@ -617,7 +660,7 @@ final class SpriteKitGameScene: SKScene {
             localPlayer.texture = textures[0]
             return
         }
-        let frameTime: TimeInterval = state == .run ? 0.14 : 0.16
+        let frameTime: TimeInterval = state == .run ? TimeInterval(7.0 / logicFps) : TimeInterval(8.0 / logicFps)
         let action = SKAction.repeatForever(.animate(with: textures, timePerFrame: frameTime, resize: false, restore: true))
         localPlayer.run(action, withKey: animActionKey)
     }

@@ -19,11 +19,13 @@ enum LevelLoader {
         var kinds: [String: TileKind] = [:]
         var clouds: [(Int, Int)] = []
         var bushes: [(Int, Int)] = []
+        var levelBottomY = 15
 
         if let layers = level["layers"] as? [String: Any],
            let ground = layers["ground"] as? [String: Any],
            let xRange = ground["x"] as? [Int], xRange.count == 2,
            let yRange = ground["y"] as? [Int], yRange.count == 2 {
+            levelBottomY = max(levelBottomY, yRange[1] - 1)
             for x in xRange[0]..<xRange[1] {
                 for y in yRange[0]..<yRange[1] {
                     let key = "\(x):\(y)"
@@ -37,7 +39,7 @@ enum LevelLoader {
             addTiles(from: objects["bricks"], into: &solid, kind: .brick, kinds: &kinds)
             collectTiles(from: objects["bricks"], into: &breakable)
             addTiles(from: objects["ground"], into: &solid, kind: .ground, kinds: &kinds)
-            addPipeTiles(from: objects["pipe"], into: &solid, kinds: &kinds)
+            addPipeTiles(from: objects["pipe"], into: &solid, kinds: &kinds, levelBottomY: levelBottomY)
             clouds = collectPoints(from: objects["cloud"])
             bushes = collectPoints(from: objects["bush"])
         }
@@ -85,7 +87,12 @@ enum LevelLoader {
         return points
     }
 
-    private static func addPipeTiles(from value: Any?, into set: inout Set<String>, kinds: inout [String: TileKind]) {
+    private static func addPipeTiles(
+        from value: Any?,
+        into set: inout Set<String>,
+        kinds: inout [String: TileKind],
+        levelBottomY: Int
+    ) {
         guard let rows = value as? [[Any]] else { return }
         for row in rows {
             guard
@@ -94,9 +101,13 @@ enum LevelLoader {
                 let topY = row[1] as? Int,
                 let height = row[2] as? Int
             else { continue }
-            for h in 0..<max(height, 1) {
-                let k1 = "\(x):\(topY + h)"
-                let k2 = "\(x + 1):\(topY + h)"
+            // Match PC logic (Level.addPipeSprite): pipe body extends well below
+            // declared height, effectively reaching the visible ground.
+            let declaredBottomY = topY + max(height, 1) - 1
+            let pipeBottomY = max(declaredBottomY, levelBottomY)
+            for y in topY...pipeBottomY {
+                let k1 = "\(x):\(y)"
+                let k2 = "\(x + 1):\(y)"
                 set.insert(k1)
                 set.insert(k2)
                 kinds[k1] = .pipe
