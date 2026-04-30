@@ -27,7 +27,7 @@ from network.protocol import (
 from ui.widgets import Button, TextInput, get_font
 
 
-windowSize = 640, 480
+windowSize = 854, 480
 
 
 class Scene:
