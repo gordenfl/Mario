@@ -17,7 +17,6 @@ final class SpriteKitGameScene: SKScene {
     private let pcAccelPerFrame: CGFloat = 0.4
     private let pcDecelPerFrame: CGFloat = 0.25
     private let pcMaxRunSpeedPerFrame: CGFloat = 3.2
-    private let sceneDownShiftPx: CGFloat = 54
     private let cloudRenderYOffset: CGFloat = 0
     private let bushRenderYOffset: CGFloat = 0
     private let playerSize = CGSize(width: 32, height: 64)
@@ -487,14 +486,22 @@ final class SpriteKitGameScene: SKScene {
         }
     }
 
+    /// PC `Level.drawLevel` uses a 480px-tall view; tile row `r` tops sit at `r * 32` (pygame y-down).
+    /// Row 7's center maps to `tileToWorld(…, y: 7).y`; subtract one tile so ground sits like PC
+    /// (matches legacy `~5.78 * tileSize + 54`). Pure midline (no −32) pulls the whole scene up one row.
+    private var pcAlignedFixedCameraWorldY: CGFloat {
+        let row = Int(floor((serverCoordinateHeight * 0.5) / tileSize))
+        let clamped = min(max(0, row), mapRows - 1)
+        return tileToWorld(x: 0, y: clamped).y - tileSize
+    }
+
     private func updateCamera() {
         let half = size.width / 2
         // Lock horizontal framing: camera X tracks Mario X (constant left-right relationship),
         // only clamped at world edges so the view does not scroll past level bounds.
         let idealCameraX = localPlayer.position.x
         let clampedX = min(max(idealCameraX, half), max(half, worldWidth - half))
-        let cameraY = tileSize * 5.78 + sceneDownShiftPx
-        cameraAnchor.position = CGPoint(x: clampedX, y: cameraY)
+        cameraAnchor.position = CGPoint(x: clampedX, y: pcAlignedFixedCameraWorldY)
     }
 
     private func publishLocalState() {
