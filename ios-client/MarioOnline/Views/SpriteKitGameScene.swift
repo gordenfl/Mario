@@ -17,8 +17,9 @@ final class SpriteKitGameScene: SKScene {
     private let pcAccelPerFrame: CGFloat = 0.4
     private let pcDecelPerFrame: CGFloat = 0.25
     private let pcMaxRunSpeedPerFrame: CGFloat = 3.2
-    private let cloudRenderYOffset: CGFloat = 0
-    private let bushRenderYOffset: CGFloat = 0
+    private let cloudRenderYOffset: CGFloat = -32
+    private let bushRenderYOffset: CGFloat = -32
+    private let brickRenderYOffset: CGFloat = -32
     private let playerSize = CGSize(width: 32, height: 64)
     private let worldNode = SKNode()
     private let backgroundNode = SKNode()
@@ -283,6 +284,9 @@ final class SpriteKitGameScene: SKScene {
                 node.position = CGPoint(x: base.x, y: base.y - tileSize)
                 // Draw pipes in front to mask remote interpolation overlap.
                 node.zPosition = 35
+            } else if kind == .brick {
+                node.position = CGPoint(x: base.x, y: base.y + brickRenderYOffset)
+                node.zPosition = 12
             } else {
                 node.position = base
                 node.zPosition = 10
@@ -296,9 +300,14 @@ final class SpriteKitGameScene: SKScene {
     private func addCollisionDebugBox(key: String, kind: TileKind, logicalX x: Int, logicalY y: Int) {
         guard showCollisionDebugBounds else { return }
         let base = tileToWorld(x: x, y: y)
-        let center = kind == .pipe
-            ? CGPoint(x: base.x, y: base.y - tileSize)
-            : base
+        let center: CGPoint
+        if kind == .pipe {
+            center = CGPoint(x: base.x, y: base.y - tileSize)
+        } else if kind == .brick {
+            center = CGPoint(x: base.x, y: base.y + brickRenderYOffset)
+        } else {
+            center = base
+        }
         let path = makeDashedRectPath(width: tileSize, height: tileSize, dash: 6, gap: 4)
         let shape = SKShapeNode(path: path)
         shape.position = center
@@ -857,9 +866,16 @@ final class SpriteKitGameScene: SKScene {
             let kind = tileKinds[key] ?? .ground
             guard kind == .ground || kind == .pipe || kind == .brick else { continue }
             let baseTop = tileToWorld(x: tileX, y: tileY).y + tileSize * 0.5
-            // Pipe sprites are rendered one tile lower to match PC visuals.
-            // Keep grounding/collision top aligned to that rendered position.
-            let top = kind == .pipe ? (baseTop - tileSize) : baseTop
+            // Pipe/brick sprites can be rendered one tile lower for visual parity.
+            // Keep grounding/collision top aligned to rendered positions.
+            let top: CGFloat
+            if kind == .pipe {
+                top = baseTop - tileSize
+            } else if kind == .brick {
+                top = baseTop + brickRenderYOffset
+            } else {
+                top = baseTop
+            }
             if let referenceY {
                 // Only consider standable surfaces at or below current feet.
                 if top > referenceY + 0.01 {
@@ -882,16 +898,17 @@ final class SpriteKitGameScene: SKScene {
         guard tileY >= 0, tileY < mapRows else { return false }
         let directKey = "\(tileX):\(tileY)"
         if solidTiles[directKey] != nil {
-            // Pipe visuals/collision are shifted down by 1 tile for PC parity.
-            // Ignore the original logical pipe row to avoid a hidden extra blocking layer.
-            if tileKinds[directKey] != .pipe {
+            // Pipe/brick visuals-collision can be shifted down by 1 tile for parity.
+            // Ignore original logical rows to avoid hidden extra blocking layers.
+            if tileKinds[directKey] != .pipe && tileKinds[directKey] != .brick {
                 return true
             }
         }
-        // Pipe visuals are shifted down by 1 tile for PC parity.
-        // A world point on the rendered pipe corresponds to logical (tileY - 1).
+        // Shifted visuals: a world point on rendered pipe/brick corresponds to logical (tileY - 1).
         let shiftedKey = "\(tileX):\(tileY - 1)"
-        if tileY - 1 >= 0, tileKinds[shiftedKey] == .pipe, solidTiles[shiftedKey] != nil {
+        if tileY - 1 >= 0,
+           (tileKinds[shiftedKey] == .pipe || tileKinds[shiftedKey] == .brick),
+           solidTiles[shiftedKey] != nil {
             return true
         }
         return false
