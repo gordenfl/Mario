@@ -1,0 +1,103 @@
+# This project was generated with 0.4.1 using template: https://github.com/beeware/briefcase-template @ v0.4.1
+[tool.briefcase]
+project_name = "Mario Fight"
+bundle = "com.gordenfl.mario"
+version = "0.0.1"
+url = "https://mario.gordenfl.com/mariofight"
+license.file = "LICENSE"
+author = "gordenfl"
+author_email = "gordenfl@gmail.com"
+
+[tool.briefcase.app.mariofight]
+formal_name = "Mario Fight"
+description = "Mario Fight"
+long_description = """More details about the app should go here.
+"""
+sources = [
+    "src/mariofight",
+]
+test_sources = [
+    "tests",
+]
+
+requires = [
+    # Add your cross-platform app requirements here
+]
+test_requires = [
+    # Add your cross-platform test requirements here
+]
+
+[tool.briefcase.app.mariofight.macOS]
+universal_build = true
+requires = [
+    # Add your macOS-specific app requirements here
+]
+
+[tool.briefcase.app.mariofight.linux]
+requires = [
+    # Add your Linux-specific app requirements here
+]
+
+[tool.briefcase.app.mariofight.linux.system.debian]
+system_requires = [
+    # Add any system packages needed at build the app here
+]
+
+system_runtime_requires = [
+    # Add any system packages needed at runtime here
+]
+
+[tool.briefcase.app.mariofight.linux.system.rhel]
+system_requires = [
+    # Add any system packages needed at build the app here
+]
+
+system_runtime_requires = [
+    # Add any system packages needed at runtime here
+]
+
+[tool.briefcase.app.mariofight.linux.system.suse]
+system_requires = [
+    # Add any system packages needed at build the app here
+]
+
+system_runtime_requires = [
+    # Add any system packages needed at runtime here
+]
+
+[tool.briefcase.app.mariofight.linux.system.arch]
+system_requires = [
+    # Add any system packages needed at build the app here
+]
+
+system_runtime_requires = [
+    # Add any system packages needed at runtime here
+]
+
+[tool.briefcase.app.mariofight.linux.flatpak]
+flatpak_runtime = "org.freedesktop.Platform"
+flatpak_runtime_version = "25.08"
+flatpak_sdk = "org.freedesktop.Sdk"
+
+[tool.briefcase.app.mariofight.windows]
+requires = [
+    # Add your Windows-specific app requirements here
+]
+
+# Mobile deployments
+[tool.briefcase.app.mariofight.iOS]
+requires = [
+    # Add your iOS-specific app requirements here
+]
+
+[tool.briefcase.app.mariofight.android]
+requires = [
+    # Add your Android-specific app requirements here
+]
+
+# Web deployments
+[tool.briefcase.app.mariofight.web]
+requires = [
+    # Add your web-specific app requirements here
+]
+
