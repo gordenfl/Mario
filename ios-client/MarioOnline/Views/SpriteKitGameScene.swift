@@ -35,6 +35,7 @@ final class SpriteKitGameScene: SKScene {
     private let hudHpLabel = SKLabelNode(fontNamed: "Menlo-Bold")
     private let hudHpBarBg = SKShapeNode(rectOf: CGSize(width: 134, height: 12), cornerRadius: 3)
     private let hudHpBarFill = SKShapeNode(rectOf: CGSize(width: 130, height: 8), cornerRadius: 2)
+    private let gameCameraPositionDebugShape = SKShapeNode()
     private let localPlayer = SKSpriteNode(color: .red, size: CGSize(width: 26, height: 30))
     private var remotePlayers: [Int: SKSpriteNode] = [:]
     private var drops: [String: SKSpriteNode] = [:]
@@ -85,6 +86,7 @@ final class SpriteKitGameScene: SKScene {
     // PC `SkyMushroom.speed` (client/entities/sky_drop.py): 1.2 px per 60Hz frame.
     private let pcMushroomSpeedPerFrame: CGFloat = 1.2
     private let showCollisionDebugBounds = true
+    private let showGameCameraPositionDebug = true
 
     private enum AnimState {
         case idle
@@ -108,12 +110,32 @@ final class SpriteKitGameScene: SKScene {
         camera = cameraAnchor
         addChild(cameraAnchor)
         setupHud()
+        setupGameCameraPositionDebug()
         configureAnimationFrames()
         tileSheet = UIImage(named: "tiles")?.cgImage
         itemsSheet = UIImage(named: "Items")?.cgImage ?? UIImage(named: "items")?.cgImage
         configureDropTextures()
         buildWorld()
         setupLocalPlayer()
+    }
+
+    private func setupGameCameraPositionDebug() {
+        guard showGameCameraPositionDebug else {
+            gameCameraPositionDebugShape.isHidden = true
+            return
+        }
+        gameCameraPositionDebugShape.isHidden = false
+        let markerSize: CGFloat = 20
+        gameCameraPositionDebugShape.path = makeDashedRectPath(width: markerSize, height: markerSize, dash: 6, gap: 4)
+        gameCameraPositionDebugShape.position = .zero
+        gameCameraPositionDebugShape.strokeColor = SKColor(red: 0.0, green: 1.0, blue: 0.85, alpha: 0.95)
+        gameCameraPositionDebugShape.lineWidth = 2.0
+        gameCameraPositionDebugShape.fillColor = .clear
+        // Above gameplay/HUD so it is always visible in the rendered view.
+        gameCameraPositionDebugShape.zPosition = 2000
+        if gameCameraPositionDebugShape.parent == nil {
+            cameraAnchor.addChild(gameCameraPositionDebugShape)
+        }
     }
 
     func setInput(left: Bool, right: Bool) {
@@ -467,10 +489,10 @@ final class SpriteKitGameScene: SKScene {
 
     private func updateCamera() {
         let half = size.width / 2
-        // Match PC camera framing: keep hero around 58% viewport width.
-        let anchorX = size.width * 0.58
-        let targetX = localPlayer.position.x - anchorX + half
-        let clampedX = min(max(targetX, half), max(half, worldWidth - half))
+        // Lock horizontal framing: camera X tracks Mario X (constant left-right relationship),
+        // only clamped at world edges so the view does not scroll past level bounds.
+        let idealCameraX = localPlayer.position.x
+        let clampedX = min(max(idealCameraX, half), max(half, worldWidth - half))
         let cameraY = tileSize * 5.78 + sceneDownShiftPx
         cameraAnchor.position = CGPoint(x: clampedX, y: cameraY)
     }

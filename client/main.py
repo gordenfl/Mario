@@ -29,6 +29,47 @@ from ui.widgets import Button, TextInput, get_font
 
 windowSize = 852, 480
 
+# Debug: draw the active game camera position in screen space (viewport center).
+DEBUG_DRAW_GAME_CAMERA_POSITION = True
+
+
+def _draw_dashed_line(surface, color, start, end, width=1, dash=8, gap=4):
+    x0, y0 = start
+    x1, y1 = end
+    dx = x1 - x0
+    dy = y1 - y0
+    length = (dx * dx + dy * dy) ** 0.5
+    if length <= 0:
+        return
+    ux, uy = dx / length, dy / length
+    traveled = 0.0
+    while traveled < length:
+        seg_start = traveled
+        seg_end = min(traveled + dash, length)
+        p0 = (int(x0 + ux * seg_start), int(y0 + uy * seg_start))
+        p1 = (int(x0 + ux * seg_end), int(y0 + uy * seg_end))
+        pygame.draw.line(surface, color, p0, p1, width)
+        traveled += dash + gap
+
+
+def draw_game_camera_position_debug(screen):
+    if not DEBUG_DRAW_GAME_CAMERA_POSITION:
+        return
+    w, h = windowSize
+    cx, cy = w // 2, h // 2
+    half = 10
+    color = (0, 255, 200)
+    width = 2
+    dash, gap = 6, 4
+    left = cx - half
+    right = cx + half
+    top = cy - half
+    bottom = cy + half
+    _draw_dashed_line(screen, color, (left, top), (right, top), width=width, dash=dash, gap=gap)
+    _draw_dashed_line(screen, color, (right, top), (right, bottom), width=width, dash=dash, gap=gap)
+    _draw_dashed_line(screen, color, (right, bottom), (left, bottom), width=width, dash=dash, gap=gap)
+    _draw_dashed_line(screen, color, (left, bottom), (left, top), width=width, dash=dash, gap=gap)
+
 
 class Scene:
     def __init__(self, screen, network: NetworkClient):
@@ -778,6 +819,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                         overlay_frames = 180
                     if death_wait_frames > 0:
                         death_wait_frames -= 1
+                        draw_game_camera_position_debug(screen)
                         pygame.display.update()
                         clock.tick(max_frame_rate)
                         continue
@@ -789,6 +831,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     text = f"{winner} 获胜！"
                     label = font.render(text, True, (255, 255, 255))
                     screen.blit(label, label.get_rect(center=(windowSize[0] // 2, windowSize[1] // 2)))
+                    draw_game_camera_position_debug(screen)
                     pygame.display.update()
                     overlay_frames -= 1
                     if overlay_frames > 0:
@@ -796,6 +839,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                         continue
                     break
 
+            draw_game_camera_position_debug(screen)
             pygame.display.update()
             clock.tick(max_frame_rate)
     finally:

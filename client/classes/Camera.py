@@ -9,11 +9,12 @@ class Camera:
         self.y = self.pos.y * 32
 
     def _calculate_offset(self):
-        xPosFloat = self.entity.getPosIndexAsFloat().x
+        # Use horizontal center so the viewport centers on Mario (sprite anchor is top-left in world).
+        xPosFloat = self.entity.rect.centerx / 32.0
         tile_size = 32.0
         screen_width = float(getattr(getattr(self.entity, "screen", None), "get_width", lambda: 640)())
         visible_tiles = max(1.0, screen_width / tile_size)
-        # Keep Mario slightly left-of-center (similar feel to previous fixed value 10 on 20-tile viewport).
+        # Lock horizontal framing: entity center stays at viewport center in X.
         anchor_tiles = visible_tiles * 0.5
 
         level_length = float(getattr(getattr(self.entity, "levelObj", None), "levelLength", 0) or 0)
