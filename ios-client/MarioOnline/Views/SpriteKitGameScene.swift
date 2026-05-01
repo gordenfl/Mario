@@ -336,7 +336,7 @@ final class SpriteKitGameScene: SKScene {
             localPlayer.size = playerSize
         }
         let spawnX: CGFloat = 48
-        let spawnGroundY = groundSurfaceY(atX: spawnX)
+            let spawnGroundY = groundSurfaceY(atX: spawnX)
         localPlayer.position = CGPoint(x: spawnX, y: spawnGroundY + playerSize.height * 0.5)
         worldNode.addChild(localPlayer)
         // Use PC JumpTrait-style vertical motion instead of SpriteKit gravity.
@@ -432,6 +432,7 @@ final class SpriteKitGameScene: SKScene {
         // Equivalent to PC JumpTrait: hold initial jump phase, then obey gravity.
         let decelHeight = pcJumpHeight - ((pcJumpVelocityPerFrame * pcJumpVelocityPerFrame) / (2 * pcGravityPerFrame))
         let wasGrounded = isPlayerGrounded()
+        let previousFootY = localPlayer.position.y - playerSize.height * 0.5
         if !wasGrounded && !jumpInProgress {
             jumpObeyGravity = true
         }
@@ -451,13 +452,15 @@ final class SpriteKitGameScene: SKScene {
 
         // Ground snap only when falling into ground; don't pre-snap while still above it.
         if jumpVerticalVelocity <= 0 {
-            let groundTop = groundSurfaceY(atX: localPlayer.position.x)
-            let targetCenterY = groundTop + playerSize.height * 0.5
-            if localPlayer.position.y <= targetCenterY {
-                localPlayer.position.y = targetCenterY
-                jumpVerticalVelocity = 0
-                jumpObeyGravity = false
-                jumpInProgress = false
+            let footY = localPlayer.position.y - playerSize.height * 0.5
+            if let landingTop = landingSurfaceYCrossed(previousFootY: previousFootY, currentFootY: footY) {
+                let targetCenterY = landingTop + playerSize.height * 0.5
+                if localPlayer.position.y <= targetCenterY {
+                    localPlayer.position.y = targetCenterY
+                    jumpVerticalVelocity = 0
+                    jumpObeyGravity = false
+                    jumpInProgress = false
+                }
             }
         }
     }
@@ -555,7 +558,8 @@ final class SpriteKitGameScene: SKScene {
                         mushroomLogicalX[id] = worldWidth - horizontalPadding
                         dropDirections[id] = -1
                     }
-                    let groundY = groundSurfaceY(atX: node.position.x) + node.size.height * 0.5
+                    let dropFootY = node.position.y - node.size.height * 0.5
+                    let groundY = groundSurfaceY(atX: node.position.x, belowWorldY: dropFootY) + node.size.height * 0.5
                     node.position.y = groundY
                 }
                 continue
@@ -565,7 +569,8 @@ final class SpriteKitGameScene: SKScene {
             dropVerticalSpeed[id] = vy
             node.position.y += vy * CGFloat(delta)
 
-            let groundY = groundSurfaceY(atX: node.position.x) + node.size.height * 0.5
+            let dropFootY = node.position.y - node.size.height * 0.5
+            let groundY = groundSurfaceY(atX: node.position.x, belowWorldY: dropFootY) + node.size.height * 0.5
             if node.position.y <= groundY {
                 node.position.y = groundY
                 dropVerticalSpeed[id] = 0
@@ -691,6 +696,45 @@ final class SpriteKitGameScene: SKScene {
         return false
     }
 
+    private func landingSurfaceYUnderPlayer(footY: CGFloat) -> CGFloat? {
+        let sampleXs = [
+            localPlayer.position.x - playerSize.width * 0.3,
+            localPlayer.position.x,
+            localPlayer.position.x + playerSize.width * 0.3
+        ]
+        var best: CGFloat?
+        for x in sampleXs {
+            let top = groundSurfaceY(atX: x, belowWorldY: footY)
+            if top <= footY + 0.01 {
+                if best == nil || top > best! {
+                    best = top
+                }
+            }
+        }
+        return best
+    }
+
+    private func landingSurfaceYCrossed(previousFootY: CGFloat, currentFootY: CGFloat) -> CGFloat? {
+        let upper = max(previousFootY, currentFootY)
+        let lower = min(previousFootY, currentFootY)
+        let sampleXs = [
+            localPlayer.position.x - playerSize.width * 0.3,
+            localPlayer.position.x,
+            localPlayer.position.x + playerSize.width * 0.3
+        ]
+        var best: CGFloat?
+        for x in sampleXs {
+            let top = groundSurfaceY(atX: x, belowWorldY: upper)
+            // Detect landing planes crossed within this frame (prevents pipe-top tunneling).
+            if top <= upper + 0.01 && top >= lower - 0.01 {
+                if best == nil || top > best! {
+                    best = top
+                }
+            }
+        }
+        return best
+    }
+
     private func makeRemoteNode(id: Int) -> SKSpriteNode {
         let node = SKSpriteNode(texture: localAnimTextures[.idle]?.first, color: .clear, size: localPlayer.size)
         node.name = "remote_\(id)"
@@ -775,8 +819,9 @@ final class SpriteKitGameScene: SKScene {
         return node
     }
 
-    private func groundSurfaceY(atX x: CGFloat) -> CGFloat {
+    private func groundSurfaceY(atX x: CGFloat, belowWorldY referenceY: CGFloat? = nil) -> CGFloat {
         let tileX = Int(floor(x / tileSize))
+        var bestTop: CGFloat?
         for tileY in 0..<mapRows {
             let key = "\(tileX):\(tileY)"
             guard solidTiles[key] != nil else { continue }
@@ -785,7 +830,19 @@ final class SpriteKitGameScene: SKScene {
             let baseTop = tileToWorld(x: tileX, y: tileY).y + tileSize * 0.5
             // Pipe sprites are rendered one tile lower to match PC visuals.
             // Keep grounding/collision top aligned to that rendered position.
-            return kind == .pipe ? (baseTop - tileSize) : baseTop
+            let top = kind == .pipe ? (baseTop - tileSize) : baseTop
+            if let referenceY {
+                // Only consider standable surfaces at or below current feet.
+                if top > referenceY + 0.01 {
+                    continue
+                }
+            }
+            if bestTop == nil || top > bestTop! {
+                bestTop = top
+            }
+        }
+        if let bestTop {
+            return bestTop
         }
         return tileToWorld(x: tileX, y: mapRows - 2).y + tileSize * 0.5
     }
