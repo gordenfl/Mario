@@ -10,19 +10,20 @@ final class SpriteKitGameScene: SKScene {
     private let smallMarioScale: CGFloat = 2.0
     private let bigMarioScale: CGFloat = 2.0
     private let pcGravityPerFrame: CGFloat = 0.8
+    // Tuned so the mobile JumpTrait-style implementation reaches ~132px apex.
     private let pcJumpVelocityPerFrame: CGFloat = 12.0
+    private let pcJumpHeight: CGFloat = 132
     private let spriteKitStableGravity: CGFloat = 24.0
-    // Calibrated to match PC jump apex under current SpriteKit gravity.
-    private let spriteKitStableJumpImpulse: CGFloat = 76.0
     private let pcAccelPerFrame: CGFloat = 0.4
     private let pcDecelPerFrame: CGFloat = 0.25
     private let pcMaxRunSpeedPerFrame: CGFloat = 3.2
-    private let sceneDownShiftPx: CGFloat = 16
-    private let cloudRenderYOffset: CGFloat = -14
-    private let bushRenderYOffset: CGFloat = -10
-    private let playerSize = CGSize(width: 26, height: 58)
+    private let sceneDownShiftPx: CGFloat = 54
+    private let cloudRenderYOffset: CGFloat = 0
+    private let bushRenderYOffset: CGFloat = 0
+    private let playerSize = CGSize(width: 32, height: 64)
     private let worldNode = SKNode()
     private let backgroundNode = SKNode()
+    private let collisionDebugNode = SKNode()
     private let cameraAnchor = SKCameraNode()
     private let hudNode = SKNode()
     private let hudMarioLabel = SKLabelNode(fontNamed: "Menlo-Bold")
@@ -37,19 +38,28 @@ final class SpriteKitGameScene: SKScene {
     private let localPlayer = SKSpriteNode(color: .red, size: CGSize(width: 26, height: 30))
     private var remotePlayers: [Int: SKSpriteNode] = [:]
     private var drops: [String: SKSpriteNode] = [:]
+    private var dropTypes: [String: String] = [:]
     private var projectiles: [Int: SKSpriteNode] = [:]
     private var projectileStates: [Int: ProjectileStateModel] = [:]
     private var solidTiles: [String: SKSpriteNode] = [:]
     private var breakableTiles: Set<String> = []
     private var tileKinds: [String: TileKind] = [:]
     private var tileSheet: CGImage?
+    private var itemsSheet: CGImage?
+    private var coinTextures: [SKTexture] = []
+    private var mushroomTexture: SKTexture?
     private var brokenTilesApplied: Set<String> = []
+    private var collisionDebugBoxes: [String: SKShapeNode] = [:]
     private var worldWidth: CGFloat = 60 * 32
     private var leftPressed = false
     private var rightPressed = false
     private var heading: Int8 = 1
     private var lastUpdate: TimeInterval = 0
     private var dropDirections: [String: Int] = [:]
+    private var dropVerticalSpeed: [String: CGFloat] = [:]
+    private var dropGrounded: [String: Bool] = [:]
+    /// Matches PC `SkyMushroom.pos_x` float + `rect.x = int(pos_x)` (trunc toward zero), not smooth sub-pixel drift.
+    private var mushroomLogicalX: [String: CGFloat] = [:]
     private var localClientId: Int = 0
     private var localAnimTextures: [AnimState: [SKTexture]] = [:]
     private var currentAnimState: AnimState?
@@ -63,6 +73,18 @@ final class SpriteKitGameScene: SKScene {
     private var jumpQueued = false
     private var jumpBufferFrames = 0
     private var horizontalVelocity: CGFloat = 0
+    private var jumpVerticalVelocity: CGFloat = 0
+    private var jumpStartY: CGFloat = 0
+    private var jumpInProgress = false
+    private var jumpObeyGravity = false
+    private let dropCoinAnimKey = "drop_coin_anim"
+    private let fireRecoilActionKey = "mario_fire_recoil"
+    private var cameraLookAhead: CGFloat = 0
+    private let pcCoinSize: CGFloat = 32
+    private let pcMushroomSize: CGFloat = 32
+    // PC `SkyMushroom.speed` (client/entities/sky_drop.py): 1.2 px per 60Hz frame.
+    private let pcMushroomSpeedPerFrame: CGFloat = 1.2
+    private let showCollisionDebugBounds = true
 
     private enum AnimState {
         case idle
@@ -82,11 +104,14 @@ final class SpriteKitGameScene: SKScene {
         backgroundColor = SKColor(red: 0.45, green: 0.75, blue: 0.98, alpha: 1.0)
         addChild(backgroundNode)
         addChild(worldNode)
+        worldNode.addChild(collisionDebugNode)
         camera = cameraAnchor
         addChild(cameraAnchor)
         setupHud()
         configureAnimationFrames()
         tileSheet = UIImage(named: "tiles")?.cgImage
+        itemsSheet = UIImage(named: "Items")?.cgImage ?? UIImage(named: "items")?.cgImage
+        configureDropTextures()
         buildWorld()
         setupLocalPlayer()
     }
@@ -103,6 +128,24 @@ final class SpriteKitGameScene: SKScene {
     func triggerJump() {
         jumpQueued = true
         jumpBufferFrames = 8
+    }
+
+    func triggerFireAnimation() {
+        let direction: CGFloat = heading >= 0 ? 1 : -1
+        let recoil = SKAction.moveBy(x: -direction * 4, y: 0, duration: 0.045)
+        recoil.timingMode = .easeOut
+        let recover = SKAction.moveBy(x: direction * 4, y: 0, duration: 0.06)
+        recover.timingMode = .easeIn
+        let flashOn = SKAction.run { [weak self] in
+            self?.localPlayer.color = .orange
+            self?.localPlayer.colorBlendFactor = 0.25
+        }
+        let flashOff = SKAction.run { [weak self] in
+            self?.localPlayer.colorBlendFactor = 0.0
+        }
+        let sequence = SKAction.sequence([flashOn, recoil, recover, flashOff])
+        localPlayer.removeAction(forKey: fireRecoilActionKey)
+        localPlayer.run(sequence, withKey: fireRecoilActionKey)
     }
 
     func syncRemotePlayers(_ states: [Int: PlayerState]) {
@@ -132,11 +175,28 @@ final class SpriteKitGameScene: SKScene {
         for id in drops.keys where !keys.contains(id) {
             drops[id]?.removeFromParent()
             drops.removeValue(forKey: id)
+            dropTypes.removeValue(forKey: id)
             dropDirections.removeValue(forKey: id)
+            dropVerticalSpeed.removeValue(forKey: id)
+            dropGrounded.removeValue(forKey: id)
+            mushroomLogicalX.removeValue(forKey: id)
         }
         for (id, drop) in states {
             let node = drops[id] ?? makeDropNode(id: id, type: drop.type)
-            node.position.x = drop.x
+            dropTypes[id] = drop.type
+            applyDropAppearance(node, type: drop.type)
+            if drop.type == "mushroom" {
+                // Keep PC-like local motion once grounded.
+                // Only snap on spawn/large divergence, while still honoring server direction updates.
+                let isGrounded = dropGrounded[id] ?? false
+                let dx = drop.x - node.position.x
+                if !isGrounded || abs(dx) > tileSize * 2.0 {
+                    node.position.x = drop.x
+                    mushroomLogicalX[id] = drop.x
+                }
+            } else {
+                node.position.x = drop.x
+            }
             dropDirections[id] = drop.direction == 0 ? 1 : drop.direction
         }
     }
@@ -150,7 +210,12 @@ final class SpriteKitGameScene: SKScene {
         }
         for (id, state) in states {
             let node = projectiles[id] ?? makeProjectileNode(id: id)
-            node.position = CGPoint(x: CGFloat(state.x), y: fromServerY(state.y))
+            // Server projectile coordinates use top-left semantics.
+            // Convert to SpriteKit center anchor so muzzle alignment matches PC.
+            node.position = CGPoint(
+                x: CGFloat(state.x) + node.size.width * 0.5,
+                y: fromServerY(state.y) - node.size.height * 0.5
+            )
         }
     }
 
@@ -158,6 +223,8 @@ final class SpriteKitGameScene: SKScene {
         for key in keys where !brokenTilesApplied.contains(key) {
             solidTiles[key]?.removeFromParent()
             solidTiles.removeValue(forKey: key)
+            collisionDebugBoxes[key]?.removeFromParent()
+            collisionDebugBoxes.removeValue(forKey: key)
             brokenTilesApplied.insert(key)
         }
     }
@@ -181,18 +248,83 @@ final class SpriteKitGameScene: SKScene {
         worldWidth = CGFloat(level.length) * tileSize
         breakableTiles = level.breakableTiles
         tileKinds = level.tileKinds
+        collisionDebugNode.removeAllChildren()
+        collisionDebugBoxes.removeAll()
         buildBackground(level: level)
         for (x, y) in level.solidTiles {
+            let key = "\(x):\(y)"
             let kind = tileKinds["\(x):\(y)"] ?? .ground
             let node = makeTileNode(kind: kind, x: x, y: y)
-            node.position = tileToWorld(x: x, y: y)
-            node.physicsBody = SKPhysicsBody(rectangleOf: node.size)
-            node.physicsBody?.isDynamic = false
-            node.physicsBody?.friction = 0.8
-            node.zPosition = 10
+            let base = tileToWorld(x: x, y: y)
+            if kind == .pipe {
+                // Keep collision grid from tile indices, but visually align pipe body/cap
+                // to the same row as PC rendering.
+                node.position = CGPoint(x: base.x, y: base.y - tileSize)
+                // Draw pipes in front to mask remote interpolation overlap.
+                node.zPosition = 35
+            } else {
+                node.position = base
+                node.zPosition = 10
+            }
             worldNode.addChild(node)
-            solidTiles["\(x):\(y)"] = node
+            solidTiles[key] = node
+            addCollisionDebugBox(key: key, kind: kind, logicalX: x, logicalY: y)
         }
+    }
+
+    private func addCollisionDebugBox(key: String, kind: TileKind, logicalX x: Int, logicalY y: Int) {
+        guard showCollisionDebugBounds else { return }
+        let base = tileToWorld(x: x, y: y)
+        let center = kind == .pipe
+            ? CGPoint(x: base.x, y: base.y - tileSize)
+            : base
+        let path = makeDashedRectPath(width: tileSize, height: tileSize, dash: 6, gap: 4)
+        let shape = SKShapeNode(path: path)
+        shape.position = center
+        shape.zPosition = 95
+        shape.strokeColor = kind == .pipe
+            ? SKColor.systemOrange.withAlphaComponent(0.9)
+            : SKColor.systemYellow.withAlphaComponent(0.85)
+        shape.lineWidth = 1.2
+        shape.fillColor = .clear
+        collisionDebugNode.addChild(shape)
+        collisionDebugBoxes[key] = shape
+    }
+
+    private func makeDashedRectPath(width: CGFloat, height: CGFloat, dash: CGFloat, gap: CGFloat) -> CGPath {
+        let halfW = width * 0.5
+        let halfH = height * 0.5
+        let path = CGMutablePath()
+
+        func addDashedLine(from start: CGPoint, to end: CGPoint) {
+            let dx = end.x - start.x
+            let dy = end.y - start.y
+            let length = hypot(dx, dy)
+            guard length > 0 else { return }
+            let ux = dx / length
+            let uy = dy / length
+            var traveled: CGFloat = 0
+            while traveled < length {
+                let segStart = traveled
+                let segEnd = min(traveled + dash, length)
+                let p1 = CGPoint(x: start.x + ux * segStart, y: start.y + uy * segStart)
+                let p2 = CGPoint(x: start.x + ux * segEnd, y: start.y + uy * segEnd)
+                path.move(to: p1)
+                path.addLine(to: p2)
+                traveled += dash + gap
+            }
+        }
+
+        let topLeft = CGPoint(x: -halfW, y: halfH)
+        let topRight = CGPoint(x: halfW, y: halfH)
+        let bottomRight = CGPoint(x: halfW, y: -halfH)
+        let bottomLeft = CGPoint(x: -halfW, y: -halfH)
+
+        addDashedLine(from: topLeft, to: topRight)
+        addDashedLine(from: topRight, to: bottomRight)
+        addDashedLine(from: bottomRight, to: bottomLeft)
+        addDashedLine(from: bottomLeft, to: topLeft)
+        return path
     }
 
     private func setupLocalPlayer() {
@@ -203,16 +335,12 @@ final class SpriteKitGameScene: SKScene {
         } else {
             localPlayer.size = playerSize
         }
-        localPlayer.position = CGPoint(x: 48, y: tileToWorld(x: 0, y: 11).y)
-        localPlayer.physicsBody = SKPhysicsBody(rectangleOf: playerSize)
-        localPlayer.physicsBody?.allowsRotation = false
-        localPlayer.physicsBody?.restitution = 0
-        localPlayer.physicsBody?.friction = 0.3
-        localPlayer.physicsBody?.linearDamping = 1.0
-        localPlayer.physicsBody?.affectedByGravity = true
+        let spawnX: CGFloat = 48
+        let spawnGroundY = groundSurfaceY(atX: spawnX)
+        localPlayer.position = CGPoint(x: spawnX, y: spawnGroundY + playerSize.height * 0.5)
         worldNode.addChild(localPlayer)
-        // Stable SpriteKit gravity tuned to current collision model.
-        physicsWorld.gravity = CGVector(dx: 0, dy: -spriteKitStableGravity)
+        // Use PC JumpTrait-style vertical motion instead of SpriteKit gravity.
+        physicsWorld.gravity = .zero
     }
 
     private func applyInput() {
@@ -222,11 +350,9 @@ final class SpriteKitGameScene: SKScene {
 
         if leftPressed {
             horizontalVelocity -= accelPerTickSpeed
-            heading = -1
         }
         if rightPressed {
             horizontalVelocity += accelPerTickSpeed
-            heading = 1
         }
         if !leftPressed && !rightPressed {
             if horizontalVelocity > 0 {
@@ -236,10 +362,19 @@ final class SpriteKitGameScene: SKScene {
             }
         }
         horizontalVelocity = min(max(horizontalVelocity, -maxRunSpeedPerSecond), maxRunSpeedPerSecond)
-        localPlayer.physicsBody?.velocity.dx = horizontalVelocity
+        let headingVelocityThreshold = pcAccelPerFrame * logicFps * 0.6
+        if horizontalVelocity > headingVelocityThreshold {
+            heading = 1
+        } else if horizontalVelocity < -headingVelocityThreshold {
+            heading = -1
+        }
+        moveLocalPlayerHorizontally(deltaX: horizontalVelocity / logicFps)
         if jumpQueued || jumpBufferFrames > 0 {
             if isPlayerGrounded() {
-                localPlayer.physicsBody?.applyImpulse(CGVector(dx: 0, dy: spriteKitStableJumpImpulse))
+                jumpVerticalVelocity = pcJumpVelocityPerFrame
+                jumpStartY = localPlayer.position.y
+                jumpInProgress = true
+                jumpObeyGravity = false
                 jumpQueued = false
                 jumpBufferFrames = 0
             } else {
@@ -249,6 +384,7 @@ final class SpriteKitGameScene: SKScene {
                 }
             }
         }
+        applyJumpTraitVerticalMotion()
         let minX = playerSize.width / 2
         let maxX = worldWidth - playerSize.width / 2
         if localPlayer.position.x < minX {
@@ -261,20 +397,84 @@ final class SpriteKitGameScene: SKScene {
         }
     }
 
+    private func moveLocalPlayerHorizontally(deltaX: CGFloat) {
+        guard deltaX != 0 else { return }
+
+        var targetX = localPlayer.position.x + deltaX
+        let halfW = playerSize.width * 0.5
+        let halfH = playerSize.height * 0.5
+        let sampleYs = [
+            localPlayer.position.y - halfH + 6,
+            localPlayer.position.y,
+            localPlayer.position.y + halfH - 6
+        ]
+
+        if deltaX > 0 {
+            let frontX = targetX + halfW
+            if sampleYs.contains(where: { isSolidTileAt(worldX: frontX, worldY: $0) }) {
+                let tileX = Int(floor(frontX / tileSize))
+                targetX = CGFloat(tileX) * tileSize - halfW - 0.01
+                horizontalVelocity = min(0, horizontalVelocity)
+            }
+        } else {
+            let frontX = targetX - halfW
+            if sampleYs.contains(where: { isSolidTileAt(worldX: frontX, worldY: $0) }) {
+                let tileX = Int(floor(frontX / tileSize))
+                targetX = CGFloat(tileX + 1) * tileSize + halfW + 0.01
+                horizontalVelocity = max(0, horizontalVelocity)
+            }
+        }
+
+        localPlayer.position.x = targetX
+    }
+
+    private func applyJumpTraitVerticalMotion() {
+        // Equivalent to PC JumpTrait: hold initial jump phase, then obey gravity.
+        let decelHeight = pcJumpHeight - ((pcJumpVelocityPerFrame * pcJumpVelocityPerFrame) / (2 * pcGravityPerFrame))
+        let wasGrounded = isPlayerGrounded()
+        if !wasGrounded && !jumpInProgress {
+            jumpObeyGravity = true
+        }
+        if jumpInProgress {
+            if (localPlayer.position.y - jumpStartY) >= decelHeight || jumpVerticalVelocity <= 0 {
+                jumpInProgress = false
+                jumpObeyGravity = true
+            }
+        }
+        if jumpObeyGravity {
+            jumpVerticalVelocity -= pcGravityPerFrame
+        }
+
+        if jumpVerticalVelocity != 0 {
+            localPlayer.position.y += jumpVerticalVelocity
+        }
+
+        // Ground snap only when falling into ground; don't pre-snap while still above it.
+        if jumpVerticalVelocity <= 0 {
+            let groundTop = groundSurfaceY(atX: localPlayer.position.x)
+            let targetCenterY = groundTop + playerSize.height * 0.5
+            if localPlayer.position.y <= targetCenterY {
+                localPlayer.position.y = targetCenterY
+                jumpVerticalVelocity = 0
+                jumpObeyGravity = false
+                jumpInProgress = false
+            }
+        }
+    }
+
     private func updateCamera() {
         let half = size.width / 2
-        // PC camera keeps Mario near half viewport width.
-        let deadZone = tileSize * 2.625
-        let targetX = localPlayer.position.x + CGFloat(heading) * deadZone
+        // Match PC camera framing: keep hero around 58% viewport width.
+        let anchorX = size.width * 0.58
+        let targetX = localPlayer.position.x - anchorX + half
         let clampedX = min(max(targetX, half), max(half, worldWidth - half))
-        let smoothed = cameraAnchor.position.x + (clampedX - cameraAnchor.position.x) * 0.14
         let cameraY = tileSize * 5.78 + sceneDownShiftPx
-        cameraAnchor.position = CGPoint(x: smoothed, y: cameraY)
+        cameraAnchor.position = CGPoint(x: clampedX, y: cameraY)
     }
 
     private func publishLocalState() {
-        let vy = localPlayer.physicsBody?.velocity.dy ?? 0
-        let vx = localPlayer.physicsBody?.velocity.dx ?? 0
+        let vy = jumpVerticalVelocity * logicFps
+        let vx = horizontalVelocity
         let onGround = abs(vy) < (pcGravityPerFrame * logicFps * 0.2)
         var flags: UInt8 = 0
         if onGround { flags |= 0b0001 }
@@ -286,7 +486,7 @@ final class SpriteKitGameScene: SKScene {
             x: topLeftX,
             y: toServerY(topLeftYInScene),
             vx: vx / 60,
-            vy: -(vy / 60),
+            vy: -jumpVerticalVelocity,
             flags: flags,
             heading: heading
         )
@@ -319,37 +519,77 @@ final class SpriteKitGameScene: SKScene {
     }
 
     private func updateDrops(delta: TimeInterval) {
-        let dropSpeedPerSecond = tileSize * 2.5
-        let speed: CGFloat = dropSpeedPerSecond * CGFloat(delta)
+        let gravity: CGFloat = tileSize * 9.0
         for (id, node) in drops {
-            let direction = dropDirections[id, default: 1]
-            node.position.x += CGFloat(direction) * speed
-            let horizontalPadding = tileSize * 0.75
-            if node.position.x < horizontalPadding {
-                node.position.x = horizontalPadding
-                dropDirections[id] = 1
+            let type = dropTypes[id] ?? "coin"
+            if dropGrounded[id] == true {
+                if type == "mushroom" {
+                    let direction = dropDirections[id, default: 1]
+                    let directionSign: CGFloat = direction >= 0 ? 1 : -1
+                    var lx = mushroomLogicalX[id] ?? node.position.x
+                    let step = pcMushroomSpeedPerFrame * logicFps * CGFloat(delta) * directionSign
+                    let nextLx = lx + step
+                    let frontX = nextLx + directionSign * (node.size.width * 0.5 + 1)
+                    let sampleYs = [
+                        node.position.y - node.size.height * 0.3,
+                        node.position.y,
+                        node.position.y + node.size.height * 0.3
+                    ]
+                    let hitWall = sampleYs.contains { sampleY in
+                        isSolidTileAt(worldX: frontX, worldY: sampleY)
+                    }
+                    if hitWall {
+                        dropDirections[id] = directionSign > 0 ? -1 : 1
+                    } else {
+                        lx = nextLx
+                        mushroomLogicalX[id] = lx
+                        node.position.x = lx.rounded(.towardZero)
+                    }
+                    let horizontalPadding = tileSize * 0.75
+                    if node.position.x < horizontalPadding {
+                        node.position.x = horizontalPadding
+                        mushroomLogicalX[id] = horizontalPadding
+                        dropDirections[id] = 1
+                    } else if node.position.x > worldWidth - horizontalPadding {
+                        node.position.x = worldWidth - horizontalPadding
+                        mushroomLogicalX[id] = worldWidth - horizontalPadding
+                        dropDirections[id] = -1
+                    }
+                    let groundY = groundSurfaceY(atX: node.position.x) + node.size.height * 0.5
+                    node.position.y = groundY
+                }
+                continue
             }
-            if node.position.x > worldWidth - horizontalPadding {
-                node.position.x = worldWidth - horizontalPadding
-                dropDirections[id] = -1
+
+            let vy = (dropVerticalSpeed[id] ?? 0) - gravity * CGFloat(delta)
+            dropVerticalSpeed[id] = vy
+            node.position.y += vy * CGFloat(delta)
+
+            let groundY = groundSurfaceY(atX: node.position.x) + node.size.height * 0.5
+            if node.position.y <= groundY {
+                node.position.y = groundY
+                dropVerticalSpeed[id] = 0
+                dropGrounded[id] = true
+                if type == "mushroom", mushroomLogicalX[id] == nil {
+                    mushroomLogicalX[id] = node.position.x
+                }
             }
         }
     }
 
     private func updateAnimations(currentTime: TimeInterval) {
-        let vx = abs(localPlayer.physicsBody?.velocity.dx ?? 0)
-        let vy = localPlayer.physicsBody?.velocity.dy ?? 0
+        let vx = abs(horizontalVelocity)
+        let vy = jumpVerticalVelocity * logicFps
         let onGroundThreshold = pcGravityPerFrame * logicFps
-        let onGround = abs(vy) < onGroundThreshold
+        let onGround = isPlayerGrounded() && abs(vy) < onGroundThreshold
         let movingIntent = leftPressed || rightPressed
         let standingLock = !movingIntent && vx < (pcAccelPerFrame * logicFps) && abs(vy) < (onGroundThreshold * 3.5)
         let nextState: AnimState
-        if standingLock {
-            nextState = .idle
-        } else if !onGround && vy > (pcJumpVelocityPerFrame * logicFps * 0.35) {
+        if !onGround {
+            // Keep jump pose for the entire airborne phase on mobile.
             nextState = .jump
-        } else if !onGround && vy < -(pcJumpVelocityPerFrame * logicFps * 0.35) {
-            nextState = .fall
+        } else if standingLock {
+            nextState = .idle
         } else if movingIntent && vx > (pcAccelPerFrame * logicFps * 1.1) {
             nextState = .run
         } else {
@@ -379,13 +619,17 @@ final class SpriteKitGameScene: SKScene {
                 onDropCollected?(id)
                 node.removeFromParent()
                 drops.removeValue(forKey: id)
+                dropTypes.removeValue(forKey: id)
                 dropDirections.removeValue(forKey: id)
+                dropVerticalSpeed.removeValue(forKey: id)
+                dropGrounded.removeValue(forKey: id)
+                mushroomLogicalX.removeValue(forKey: id)
             }
         }
     }
 
     private func detectTileBreak() {
-        let vy = localPlayer.physicsBody?.velocity.dy ?? 0
+        let vy = jumpVerticalVelocity * logicFps
         let upwardBreakThreshold = pcAccelPerFrame * logicFps * 1.25
         guard vy > upwardBreakThreshold else { return }
         let headX = Int(localPlayer.position.x / tileSize)
@@ -440,9 +684,7 @@ final class SpriteKitGameScene: SKScene {
             localPlayer.position.x + playerSize.width * 0.3
         ]
         for x in sampleXs {
-            let tx = Int(floor(x / tileSize))
-            let ty = mapRows - 1 - Int(floor(footY / tileSize))
-            if solidTiles["\(tx):\(ty)"] != nil {
+            if isSolidTileAt(worldX: x, worldY: footY) {
                 return true
             }
         }
@@ -510,7 +752,7 @@ final class SpriteKitGameScene: SKScene {
     }
 
     private func makeProjectileNode(id: Int) -> SKSpriteNode {
-        let node = SKSpriteNode(color: .orange, size: CGSize(width: 10, height: 10))
+        let node = SKSpriteNode(color: .orange, size: CGSize(width: 16, height: 16))
         node.name = "proj_\(id)"
         node.zPosition = 30
         worldNode.addChild(node)
@@ -519,15 +761,54 @@ final class SpriteKitGameScene: SKScene {
     }
 
     private func makeDropNode(id: String, type: String) -> SKSpriteNode {
-        let color: SKColor = type == "mushroom" ? .systemPink : .yellow
-        let dropSize = tileSize * 0.56
-        let node = SKSpriteNode(color: color, size: CGSize(width: dropSize, height: dropSize))
+        let dropSize = type == "mushroom" ? pcMushroomSize : pcCoinSize
+        let node = SKSpriteNode(color: .clear, size: CGSize(width: dropSize, height: dropSize))
+        applyDropAppearance(node, type: type)
         node.position.y = tileToWorld(x: 0, y: 9).y + tileSize * 3.125
         node.name = "drop_\(id)"
         node.zPosition = 28
         worldNode.addChild(node)
         drops[id] = node
+        dropTypes[id] = type
+        dropVerticalSpeed[id] = 0
+        dropGrounded[id] = false
         return node
+    }
+
+    private func groundSurfaceY(atX x: CGFloat) -> CGFloat {
+        let tileX = Int(floor(x / tileSize))
+        for tileY in 0..<mapRows {
+            let key = "\(tileX):\(tileY)"
+            guard solidTiles[key] != nil else { continue }
+            let kind = tileKinds[key] ?? .ground
+            guard kind == .ground || kind == .pipe || kind == .brick else { continue }
+            let baseTop = tileToWorld(x: tileX, y: tileY).y + tileSize * 0.5
+            // Pipe sprites are rendered one tile lower to match PC visuals.
+            // Keep grounding/collision top aligned to that rendered position.
+            return kind == .pipe ? (baseTop - tileSize) : baseTop
+        }
+        return tileToWorld(x: tileX, y: mapRows - 2).y + tileSize * 0.5
+    }
+
+    private func isSolidTileAt(worldX x: CGFloat, worldY y: CGFloat) -> Bool {
+        let tileX = Int(floor(x / tileSize))
+        let tileY = mapRows - 1 - Int(floor(y / tileSize))
+        guard tileY >= 0, tileY < mapRows else { return false }
+        let directKey = "\(tileX):\(tileY)"
+        if solidTiles[directKey] != nil {
+            // Pipe visuals/collision are shifted down by 1 tile for PC parity.
+            // Ignore the original logical pipe row to avoid a hidden extra blocking layer.
+            if tileKinds[directKey] != .pipe {
+                return true
+            }
+        }
+        // Pipe visuals are shifted down by 1 tile for PC parity.
+        // A world point on the rendered pipe corresponds to logical (tileY - 1).
+        let shiftedKey = "\(tileX):\(tileY - 1)"
+        if tileY - 1 >= 0, tileKinds[shiftedKey] == .pipe, solidTiles[shiftedKey] != nil {
+            return true
+        }
+        return false
     }
 
     private func buildBackground(level: TileMapData) {
@@ -553,7 +834,10 @@ final class SpriteKitGameScene: SKScene {
                 guard let tex = tileTexture(tileX: colOffset, tileY: 20 + rowOffset, sheetTile: 16) else { continue }
                 let node = SKSpriteNode(texture: tex, size: CGSize(width: tileSize, height: tileSize))
                 let base = tileToWorld(x: x + colOffset, y: y + rowOffset)
-                node.position = CGPoint(x: base.x, y: base.y + cloudRenderYOffset)
+                node.position = CGPoint(
+                    x: base.x,
+                    y: base.y + cloudRenderYOffset
+                )
                 node.zPosition = -80
                 node.alpha = 0.95
                 backgroundNode.addChild(node)
@@ -566,7 +850,10 @@ final class SpriteKitGameScene: SKScene {
             guard let tex = tileTexture(tileX: 11 + colOffset, tileY: 11, sheetTile: 16) else { continue }
             let node = SKSpriteNode(texture: tex, size: CGSize(width: tileSize, height: tileSize))
             let base = tileToWorld(x: x + colOffset, y: y)
-            node.position = CGPoint(x: base.x, y: base.y + bushRenderYOffset)
+            node.position = CGPoint(
+                x: base.x,
+                y: base.y + bushRenderYOffset
+            )
             node.zPosition = -70
             backgroundNode.addChild(node)
         }
@@ -699,6 +986,62 @@ final class SpriteKitGameScene: SKScene {
     private func pixelTexture(_ texture: SKTexture) -> SKTexture {
         texture.filteringMode = .nearest
         return texture
+    }
+
+    private func configureDropTextures() {
+        coinTextures = []
+        mushroomTexture = nil
+        guard let sheet = itemsSheet else { return }
+
+        // PC coin animation uses Items.png tiles (x: 0..3, y: 7), 16x16, deltaTime=10.
+        for frameX in 0..<4 {
+            if let texture = itemTexture(tileX: frameX, tileY: 7, sheetTile: 16) {
+                coinTextures.append(texture)
+            }
+        }
+        // PC mushroom sprite is cropped at pixel (0,16) with 16x16 size.
+        if let crop = sheet.cropping(to: CGRect(x: 0, y: 16, width: 16, height: 16)) {
+            mushroomTexture = pixelTexture(SKTexture(image: UIImage(cgImage: crop)))
+        } else if let tileFallback = itemTexture(tileX: 0, tileY: 1, sheetTile: 16) {
+            mushroomTexture = tileFallback
+        }
+    }
+
+    private func applyDropAppearance(_ node: SKSpriteNode, type: String) {
+        node.removeAction(forKey: dropCoinAnimKey)
+        node.colorBlendFactor = 0.0
+        node.texture = nil
+        let side = type == "mushroom" ? pcMushroomSize : pcCoinSize
+        node.size = CGSize(width: side, height: side)
+
+        if type == "mushroom" {
+            if let texture = mushroomTexture {
+                node.texture = texture
+            } else {
+                node.color = .systemPink
+                node.colorBlendFactor = 1.0
+            }
+            return
+        }
+
+        if let first = coinTextures.first {
+            node.texture = first
+            if coinTextures.count > 1 {
+                let action = SKAction.repeatForever(.animate(with: coinTextures, timePerFrame: 10.0 / 60.0, resize: false, restore: true))
+                node.run(action, withKey: dropCoinAnimKey)
+            }
+        } else {
+            node.color = .yellow
+            node.colorBlendFactor = 1.0
+        }
+    }
+
+    private func itemTexture(tileX: Int, tileY: Int, sheetTile: Int) -> SKTexture? {
+        guard let sheet = itemsSheet else { return nil }
+        let px = tileX * sheetTile
+        let py = tileY * sheetTile
+        guard let crop = sheet.cropping(to: CGRect(x: px, y: py, width: sheetTile, height: sheetTile)) else { return nil }
+        return pixelTexture(SKTexture(image: UIImage(cgImage: crop)))
     }
 
     private func fromServerY(_ y: Double) -> CGFloat {

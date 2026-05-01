@@ -40,23 +40,23 @@ struct LoginLobbyView: View {
     }
 
     private var loginView: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 14) {
             Text("超级马里奥 - 联机版")
-                .font(.custom("STKaiti", size: 58))
+                .font(.custom("STKaiti", size: 30))
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
 
             Text("请输入用户名登录游戏")
-                .font(.custom("STKaiti", size: 42))
+                .font(.custom("STKaiti", size: 18))
                 .foregroundStyle(Color.white.opacity(0.7))
                 .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
 
             TextField("", text: $viewModel.username, prompt: Text("输入用户名...").foregroundStyle(Color.white.opacity(0.45)))
-                .font(.custom("STKaiti", size: 42))
+                .font(.custom("STKaiti", size: 20))
                 .foregroundStyle(.white.opacity(0.88))
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
-                .frame(width: 540)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .frame(maxWidth: 320)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color.black.opacity(0.28))
@@ -69,9 +69,9 @@ struct LoginLobbyView: View {
             Button("进入大厅") {
                 viewModel.connectAndLogin()
             }
-            .font(.custom("STKaiti", size: 44))
+            .font(.custom("STKaiti", size: 22))
             .foregroundStyle(.white)
-            .frame(width: 300, height: 72)
+            .frame(width: 220, height: 48)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color(red: 0.18, green: 0.53, blue: 1.0))
@@ -82,28 +82,28 @@ struct LoginLobbyView: View {
             )
 
             Text(viewModel.statusText)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
                 .lineLimit(2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 20)
     }
 
     private var lobbyCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             Text("欢迎, \(viewModel.username)")
-                .font(.custom("STKaiti", size: 56))
+                .font(.custom("STKaiti", size: 30))
                 .foregroundStyle(.white)
 
             Text("点击房间加入，或创建新房间。")
-                .font(.custom("STKaiti", size: 42))
+                .font(.custom("STKaiti", size: 18))
                 .foregroundStyle(.white.opacity(0.72))
 
             Text("当前可加入房间: \(viewModel.rooms.count) 个")
-                .font(.custom("STKaiti", size: 46))
+                .font(.custom("STKaiti", size: 20))
                 .foregroundStyle(Color(red: 0.89, green: 0.89, blue: 0.5))
-                .padding(.top, 4)
+                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -112,26 +112,26 @@ struct LoginLobbyView: View {
         VStack(spacing: 0) {
             lobbyCard
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 14)
+                .padding(.top, 8)
 
             if !viewModel.rooms.isEmpty {
                 ScrollView {
-                    VStack(spacing: 10) {
+                    VStack(spacing: 8) {
                         ForEach(viewModel.rooms) { room in
                             Button {
                                 viewModel.joinRoom(room.roomId)
                             } label: {
                                 HStack {
                                     Text("房间 \(room.roomId)")
-                                        .font(.system(size: 20, weight: .semibold))
+                                        .font(.system(size: 16, weight: .semibold))
                                         .foregroundStyle(.white)
                                     Spacer()
                                     Text("\(room.players.count) 人")
-                                        .font(.system(size: 16, weight: .medium))
+                                        .font(.system(size: 13, weight: .medium))
                                         .foregroundStyle(.white.opacity(0.8))
                                 }
-                                .padding(.horizontal, 14)
-                                .frame(height: 46)
+                                .padding(.horizontal, 12)
+                                .frame(height: 40)
                                 .background(
                                     RoundedRectangle(cornerRadius: 8)
                                         .fill(Color.black.opacity(0.25))
@@ -143,20 +143,20 @@ struct LoginLobbyView: View {
                             }
                         }
                     }
-                    .padding(.top, 10)
+                    .padding(.top, 8)
                 }
-                .frame(maxHeight: 190)
+                .frame(minHeight: 180, maxHeight: 320)
             }
 
             Text(viewModel.statusText)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.white.opacity(0.68))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 10)
+                .padding(.top, 8)
 
             Spacer()
 
-            HStack(spacing: 34) {
+            HStack(spacing: 14) {
                 lobbyActionButton(title: "刷新") {
                     viewModel.requestRooms()
                 }
@@ -170,8 +170,8 @@ struct LoginLobbyView: View {
                     viewModel.statusText = "请输入用户名并连接服务器"
                 }
             }
-            .padding(.bottom, 16)
-            .padding(.top, 12)
+            .padding(.bottom, 10)
+            .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
@@ -179,9 +179,9 @@ struct LoginLobbyView: View {
 
     private func lobbyActionButton(title: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
-            .font(.custom("STKaiti", size: 44))
+            .font(.custom("STKaiti", size: 20))
             .foregroundStyle(.white)
-            .frame(width: 210, height: 72)
+            .frame(maxWidth: .infinity, minHeight: 46)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color(red: 0.23, green: 0.56, blue: 0.97))

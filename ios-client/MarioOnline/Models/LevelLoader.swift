@@ -36,10 +36,11 @@ enum LevelLoader {
         }
 
         if let objects = level["objects"] as? [String: Any] {
+            addTiles(from: objects["ground"], into: &solid, kind: .ground, kinds: &kinds)
             addTiles(from: objects["bricks"], into: &solid, kind: .brick, kinds: &kinds)
             collectTiles(from: objects["bricks"], into: &breakable)
-            addTiles(from: objects["ground"], into: &solid, kind: .ground, kinds: &kinds)
             addPipeTiles(from: objects["pipe"], into: &solid, kinds: &kinds, levelBottomY: levelBottomY)
+            applySkyCutouts(from: objects["sky"], solid: &solid, kinds: &kinds)
             clouds = collectPoints(from: objects["cloud"])
             bushes = collectPoints(from: objects["bush"])
         }
@@ -87,6 +88,22 @@ enum LevelLoader {
         return points
     }
 
+    private static func applySkyCutouts(
+        from value: Any?,
+        solid: inout Set<String>,
+        kinds: inout [String: TileKind]
+    ) {
+        guard let rows = value as? [[Any]] else { return }
+        for row in rows {
+            guard row.count >= 2, let x = row[0] as? Int, let y = row[1] as? Int else { continue }
+            let key = "\(x):\(y)"
+            // Mirror PC behavior: keep pipe tiles, clear other solids to sky.
+            if kinds[key] == .pipe { continue }
+            solid.remove(key)
+            kinds.removeValue(forKey: key)
+        }
+    }
+
     private static func addPipeTiles(
         from value: Any?,
         into set: inout Set<String>,
@@ -94,7 +111,6 @@ enum LevelLoader {
         levelBottomY: Int
     ) {
         guard let rows = value as? [[Any]] else { return }
-        let pipeTopDownShift = 1
         for row in rows {
             guard
                 row.count >= 3,
@@ -102,12 +118,11 @@ enum LevelLoader {
                 let topY = row[1] as? Int,
                 let height = row[2] as? Int
             else { continue }
-            let effectiveTopY = topY + pipeTopDownShift
             // Match PC logic (Level.addPipeSprite): pipe body extends well below
             // declared height, effectively reaching the visible ground.
-            let declaredBottomY = effectiveTopY + max(height, 1) - 1
+            let declaredBottomY = topY + max(height, 1) - 1
             let pipeBottomY = max(declaredBottomY, levelBottomY)
-            for y in effectiveTopY...pipeBottomY {
+            for y in topY...pipeBottomY {
                 let k1 = "\(x):\(y)"
                 let k2 = "\(x + 1):\(y)"
                 set.insert(k1)

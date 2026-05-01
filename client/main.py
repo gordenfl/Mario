@@ -27,7 +27,7 @@ from network.protocol import (
 from ui.widgets import Button, TextInput, get_font
 
 
-windowSize = 854, 480
+windowSize = 852, 480
 
 
 class Scene:
@@ -446,6 +446,16 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
     reported_drop_ids = set()
     pending_drop_collision_requests = set()
     last_tcp_state_sync = 0.0
+    game_music_stopped = False
+
+    def stop_game_music():
+        nonlocal game_music_stopped
+        if game_music_stopped:
+            return
+        try:
+            sound.music_channel.stop()
+        finally:
+            game_music_stopped = True
 
     def handle_game_message(message, current_game_over):
         msg_type = message.get("type")
@@ -696,6 +706,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                 for message in messages:
                     game_over_info = handle_game_message(message, game_over_info)
                     if game_over_info:
+                        stop_game_music()
                         break
 
                 # Keep entity/projectile drawing on the exact same camera transform
@@ -758,6 +769,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     for message in extra_msgs:
                         game_over_info = handle_game_message(message, game_over_info)
                         if game_over_info:
+                            stop_game_music()
                             break
 
                 if game_over_info:
@@ -787,6 +799,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
             pygame.display.update()
             clock.tick(max_frame_rate)
     finally:
+        stop_game_music()
         try:
             network.send_message({"type": "leave_room"})
         except Exception:

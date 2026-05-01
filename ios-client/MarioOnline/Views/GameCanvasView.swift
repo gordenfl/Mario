@@ -30,7 +30,10 @@ struct GameCanvasView: View {
                     onMoveLeftChanged: { pressed in viewModel.setMove(left: pressed) },
                     onMoveRightChanged: { pressed in viewModel.setMove(right: pressed) },
                     onJump: { scene.triggerJump() },
-                    onFire: { viewModel.fire() }
+                    onFire: {
+                        scene.triggerFireAnimation()
+                        viewModel.fire()
+                    }
                 )
                 .allowsHitTesting(false)
             }
@@ -38,7 +41,7 @@ struct GameCanvasView: View {
     }
 
     private func configureScene() {
-        scene.scaleMode = SKSceneScaleMode.aspectFill
+        scene.scaleMode = SKSceneScaleMode.aspectFit
         scene.setLocalClientId(viewModel.localClientIdentifier())
         scene.onLocalState = { (state: PlayerState) in
             Task { @MainActor in

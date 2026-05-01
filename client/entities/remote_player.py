@@ -44,6 +44,11 @@ class RemotePlayer:
         self.last_udp_timestamp = 0
         self.last_udp_monotonic = 0.0
         self.force_big_mario = True
+        self.idle_position_epsilon = 0.8
+        self.idle_velocity_epsilon = 0.08
+        self.moving_frames = 0
+        self.still_frames = 0
+        self.is_moving_state = False
         self.state = {
             "position": [0, 0],
             "velocity": [0, 0],
@@ -175,6 +180,27 @@ class RemotePlayer:
         prev_pos = self.prev_position if hasattr(self, "prev_position") else [self.rect.x, self.rect.y]
         dx = x - prev_pos[0]
         dy = y - prev_pos[1]
+        move_signal = abs(vx) > self.idle_velocity_epsilon or abs(dx) > self.idle_position_epsilon
+
+        # Suppress tiny network jitter while idle to prevent texture flicker.
+        if not move_signal and abs(dy) < self.idle_position_epsilon:
+            x = prev_pos[0]
+            y = prev_pos[1]
+            dx = 0.0
+            dy = 0.0
+
+        # Hysteresis: avoid toggling run/idle on one-frame jitter.
+        if move_signal:
+            self.moving_frames += 1
+            self.still_frames = 0
+        else:
+            self.still_frames += 1
+            self.moving_frames = 0
+        if not self.is_moving_state and self.moving_frames >= 2:
+            self.is_moving_state = True
+        elif self.is_moving_state and self.still_frames >= 4:
+            self.is_moving_state = False
+
         if heading is None:
             if dx > 0.5:
                 heading = 1
@@ -182,7 +208,9 @@ class RemotePlayer:
                 heading = -1
             else:
                 heading = self.heading
-        self.heading = heading
+        # Keep facing stable when idle; only turn when movement is meaningful.
+        if self.is_moving_state and heading is not None:
+            self.heading = heading
         if on_ground is None:
             on_ground = abs(vy) < 0.8 and abs(dy) < 1.5
         if self.is_dying:
@@ -191,7 +219,7 @@ class RemotePlayer:
             if not on_ground:
                 self.current_animation.inAir()
             else:
-                if abs(dx) > 0.5:
+                if self.is_moving_state:
                     self.current_animation.update()
                 else:
                     self.current_animation.idle()
