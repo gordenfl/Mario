@@ -33,6 +33,43 @@ windowSize = 852, 480
 DEBUG_DRAW_GAME_CAMERA_POSITION = True
 
 
+class _GameBgmToggle:
+    """Top-right in-run toggle for background music (pygame mixer channel 0)."""
+
+    def __init__(self, sound: Sound, screen_width: int):
+        self.sound = sound
+        self.on = bool(pygame.mixer.Channel(0).get_busy())
+        bw, bh = 104, 30
+        self.button = Button(
+            (screen_width - bw - 8, 8, bw, bh),
+            "关音乐" if self.on else "开音乐",
+            self._toggle,
+            font=get_font(20),
+        )
+
+    def _toggle(self):
+        if self.on:
+            self.sound.music_channel.stop()
+            self.on = False
+            self.button.text = "开音乐"
+        else:
+            self.sound.music_channel.play(self.sound.soundtrack, loops=-1)
+            self.on = True
+            self.button.text = "关音乐"
+
+    def mark_stopped_externally(self):
+        """Game over / leave: channel was stopped outside this control."""
+        self.on = False
+        self.button.text = "开音乐"
+
+    def handle_event(self, event):
+        self.button.handle_event(event)
+
+    def draw(self, surface):
+        self.button.update(pygame.mouse.get_pos())
+        self.button.draw(surface)
+
+
 def _draw_dashed_line(surface, color, start, end, width=1, dash=8, gap=4):
     x0, y0 = start
     x1, y1 = end
@@ -439,6 +476,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
     level.loadLevel("Level1-1")
     menu = Menu(screen, dashboard, level, sound)
     menu.start = True
+    bgm_toggle = _GameBgmToggle(sound, windowSize[0])
 
     mario = Mario(0, 0, level, screen, dashboard, sound)
     spawn = room_ready_msg.get("your_spawn", "left")
@@ -497,6 +535,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
             sound.music_channel.stop()
         finally:
             game_music_stopped = True
+        bgm_toggle.mark_stopped_externally()
 
     def handle_game_message(message, current_game_over):
         msg_type = message.get("type")
@@ -658,6 +697,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     network.close()
                     pygame.quit()
                     sys.exit(0)
+                bgm_toggle.handle_event(event)
 
             udp_events = network.poll_udp()
             for msg_type, event in udp_events:
@@ -708,6 +748,8 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
 
             if mario.pause:
                 mario.pauseObj.update()
+                bgm_toggle.draw(screen)
+                pygame.display.update()
             else:
                 level.drawLevel(mario.camera)
                 dashboard.set_player_health(mario.hp)
@@ -820,6 +862,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     if death_wait_frames > 0:
                         death_wait_frames -= 1
                         draw_game_camera_position_debug(screen)
+                        bgm_toggle.draw(screen)
                         pygame.display.update()
                         clock.tick(max_frame_rate)
                         continue
@@ -832,6 +875,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     label = font.render(text, True, (255, 255, 255))
                     screen.blit(label, label.get_rect(center=(windowSize[0] // 2, windowSize[1] // 2)))
                     draw_game_camera_position_debug(screen)
+                    bgm_toggle.draw(screen)
                     pygame.display.update()
                     overlay_frames -= 1
                     if overlay_frames > 0:
@@ -840,6 +884,7 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     break
 
             draw_game_camera_position_debug(screen)
+            bgm_toggle.draw(screen)
             pygame.display.update()
             clock.tick(max_frame_rate)
     finally:
