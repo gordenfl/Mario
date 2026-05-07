@@ -5,9 +5,6 @@ client/main.spec
 *.pyc
 client/venv/*
 .DS_Store
-ios-client/.DS_Store
-ios-client/MarioOnline/.DS_Store
-ios-client/MarioOnline/MarioOnline/.DS_Store
-.DS_Store
-.DS_Store
-ios/venv/
+
+client_kivy/.DS_Store
+client_kivy/.venv/*
