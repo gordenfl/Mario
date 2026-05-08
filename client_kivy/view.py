@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 
 from kivy.clock import Clock
-from kivy.graphics import Color, Ellipse, Rectangle
+from kivy.graphics import Color, Ellipse, PopMatrix, PushMatrix, Rectangle, Scale, Translate
 from kivy.uix.widget import Widget
 
 from .input import TouchControls
@@ -20,6 +20,8 @@ def _world_to_kivy_y(screen_h: float, y_top: float, tex_h: float) -> float:
 
 class GameView(Widget):
     CLIENT_ROOT = Path(__file__).resolve().parents[1] / "client"
+    VIRTUAL_W = 852.0
+    VIRTUAL_H = 480.0
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -33,19 +35,35 @@ class GameView(Widget):
         self.camera_x = 0.0
         self._dt = 1.0 / 60.0
         self._tick_i = 0
+        self._view_scale = 1.0
+        self._view_offset = (0.0, 0.0)
 
         Clock.schedule_interval(self._tick, self._dt)
 
     def on_touch_down(self, touch):
-        return self.controls.on_touch_down(touch, self.width, self.height) or super().on_touch_down(
-            touch
-        )
+        vx, vy = self._to_virtual(touch.x, touch.y)
+        # Create a lightweight touch-like object with virtual coords for controls.
+        touch_v = type("TouchV", (), {})()
+        touch_v.x = vx
+        touch_v.y = vy
+        touch_v.uid = touch.uid
+        return self.controls.on_touch_down(touch_v, self.VIRTUAL_W, self.VIRTUAL_H) or super().on_touch_down(touch)
 
     def on_touch_move(self, touch):
-        return self.controls.on_touch_move(touch) or super().on_touch_move(touch)
+        vx, vy = self._to_virtual(touch.x, touch.y)
+        touch_v = type("TouchV", (), {})()
+        touch_v.x = vx
+        touch_v.y = vy
+        touch_v.uid = touch.uid
+        return self.controls.on_touch_move(touch_v) or super().on_touch_move(touch)
 
     def on_touch_up(self, touch):
-        return self.controls.on_touch_up(touch) or super().on_touch_up(touch)
+        vx, vy = self._to_virtual(touch.x, touch.y)
+        touch_v = type("TouchV", (), {})()
+        touch_v.x = vx
+        touch_v.y = vy
+        touch_v.uid = touch.uid
+        return self.controls.on_touch_up(touch_v) or super().on_touch_up(touch)
 
     def _tick(self, _dt):
         joy = self.controls.joy
@@ -62,11 +80,33 @@ class GameView(Widget):
             )
         self.projectiles.update(self.level)
 
-        target = -self.mario.rect.centerx + self.width * 0.5
-        max_scroll = max(self.level.length_tiles * TILE - self.width, 0.0)
+        # Camera is computed in *virtual* pixels, independent of window scaling.
+        target = -self.mario.rect.centerx + self.VIRTUAL_W * 0.5
+        max_scroll = max(self.level.length_tiles * TILE - self.VIRTUAL_W, 0.0)
         self.camera_x = max(-max_scroll, min(0.0, target))
 
         self._redraw()
+
+    def _compute_view_transform(self):
+        w = float(self.width)
+        h = float(self.height)
+        if w <= 1 or h <= 1:
+            self._view_scale = 1.0
+            self._view_offset = (0.0, 0.0)
+            return
+        s = min(w / self.VIRTUAL_W, h / self.VIRTUAL_H)
+        ox = (w - self.VIRTUAL_W * s) * 0.5
+        oy = (h - self.VIRTUAL_H * s) * 0.5
+        self._view_scale = s
+        self._view_offset = (ox, oy)
+
+    def _to_virtual(self, x: float, y: float):
+        """Map window coords -> virtual framebuffer coords."""
+        s = self._view_scale or 1.0
+        ox, oy = self._view_offset
+        vx = (x - ox) / s
+        vy = (y - oy) / s
+        return vx, vy
 
     def _draw_tiled_sky(self, w: float, h: float):
         sky = self.sprite_repo.static.get("sky")
@@ -91,7 +131,9 @@ class GameView(Widget):
     def _draw_cell_tile(self, h: float, tx: int, ty: int, cell):
         sx = tx * TILE + self.camera_x
         y_top = ty * TILE
-        screen_y_bottom_tile = _world_to_kivy_y(h, y_top + TILE, TILE)
+        # World Y is top-left based. Convert tile's top (y_top) to Kivy's bottom-left.
+        # screen_bottom = screen_h - world_top - tile_height
+        screen_y_bottom_tile = _world_to_kivy_y(h, y_top, TILE)
 
         if cell.sprite_key == "sky" and not cell.redraw_sky_below:
             return
@@ -154,16 +196,29 @@ class GameView(Widget):
 
     def _redraw(self):
         self.canvas.clear()
-        w = float(self.width)
-        h = float(self.height)
+        self._compute_view_transform()
+        w = float(self.VIRTUAL_W)
+        h = float(self.VIRTUAL_H)
 
         with self.canvas:
+            # Letterbox background (window space)
+            Color(0.0, 0.0, 0.0, 1.0)
+            Rectangle(pos=(0, 0), size=(self.width, self.height))
+
+            # Apply transform to draw the virtual framebuffer.
+            PushMatrix()
+            Translate(self._view_offset[0], self._view_offset[1])
+            Scale(self._view_scale, self._view_scale, 1.0)
+
             self._draw_tiled_sky(w, h)
 
             tx0 = int((-self.camera_x) // TILE) - 2
             tx1 = int(((-self.camera_x) + w) // TILE) + 3
 
-            for ty in range(len(self.level.tiles)):
+            # Only draw tiles that could intersect the current viewport vertically.
+            # Without this, high-DPI window sizes may show far-below "underground" tiles.
+            max_visible_ty = int(h // TILE) + 4
+            for ty in range(min(len(self.level.tiles), max_visible_ty)):
                 for tx in range(max(0, tx0), min(self.level.ncol, tx1)):
                     cell = self.level.tiles[ty][tx]
                     self._draw_cell_tile(h, tx, ty, cell)
@@ -178,3 +233,5 @@ class GameView(Widget):
                 Ellipse(pos=(cx - 48, cy - 48), size=(96, 96))
                 Color(1.0, 1.0, 1.0, 0.18)
                 Ellipse(pos=(kx - 28, ky - 28), size=(56, 56))
+
+            PopMatrix()

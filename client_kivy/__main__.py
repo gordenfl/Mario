@@ -11,7 +11,10 @@ class MarioFightKivyApp(App):
     def build(self):
         # Prefer landscape; iOS orientation will be set in Xcode/plist later.
         try:
-            Window.size = (852, 480)
+            # On desktop, allow resizing. The game renders to a fixed virtual
+            # framebuffer (852x480) and auto-scales with letterboxing.
+            Window.size = (1024, 576)
+            Window.resizable = True
         except Exception:
             pass
 
