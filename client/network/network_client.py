@@ -1,9 +1,24 @@
 import json
+import logging
 import queue
 import socket
 import threading
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+
+from .protocol import (
+    MSG_HELLO_ACK,
+    MSG_PLAYER_STATE,
+    MSG_PROJECTILE_STATE,
+    MSG_ACTION,
+    pack_player_state,
+    pack_projectile_state,
+    pack_action,
+    unpack_player_state,
+    unpack_projectile_state,
+    unpack_action,
+)
+from .udp_client import UdpClient
 
 
 NEWLINE = "\n"
@@ -36,6 +51,10 @@ class NetworkClient:
         self.username: Optional[str] = None
         self.room_id: Optional[str] = None
         self.running = False
+        self._udp_client: Optional[UdpClient] = None
+        self._udp_enabled = False
+        self._udp_state_interval = 1.0 / 60.0
+        self._last_udp_state_sent = 0.0
 
     def connect(self, username: str) -> Dict:
         """Connect to the server and perform login. Returns login response."""
@@ -65,6 +84,10 @@ class NetworkClient:
                 pass
         if self._writer_thread and self._writer_thread.is_alive():
             self._writer_thread.join(timeout=1.0)
+        if self._udp_client:
+            self._udp_client.close()
+            self._udp_client = None
+        self._udp_enabled = False
 
     def list_rooms(self) -> List[Dict]:
         self.send_message({"type": "list_rooms"})
@@ -139,6 +162,98 @@ class NetworkClient:
             "y": int(y),
         }
         self.send_message(payload)
+
+    # -- UDP support -----------------------------------------------------
+
+    def enable_udp(self, token: str, client_id: int, port: Optional[int] = None, host: Optional[str] = None) -> bool:
+        """Initialise the UDP transport for high-frequency messages."""
+        token = (token or "").strip()
+        if not token:
+            logging.debug("UDP token missing; UDP channel not enabled")
+            return False
+        if host in (None, "", "0.0.0.0"):
+            host = self.host
+        if port is None:
+            port = self.port
+        if self._udp_client is None:
+            self._udp_client = UdpClient()
+        try:
+            self._udp_client.open(token, client_id, host, port)
+            self._udp_enabled = True
+            self._last_udp_state_sent = 0.0
+            logging.debug("UDP channel enabled: host=%s port=%s client_id=%s", host, port, client_id)
+            return True
+        except OSError as exc:
+            logging.warning("Failed to open UDP channel: %s", exc)
+            self._udp_enabled = False
+            return False
+
+    def poll_udp(self) -> List[Tuple[int, dict]]:
+        """Poll the UDP socket and return decoded events."""
+        if not self._udp_client or not self._udp_enabled:
+            return []
+        events = self._udp_client.poll()
+        for msg_type, event in events:
+            if msg_type == MSG_HELLO_ACK:
+                logging.debug("Received UDP handshake acknowledgment from %s", event.get("addr"))
+            elif msg_type == MSG_PLAYER_STATE:
+                try:
+                    event["player_state"] = unpack_player_state(event.get("payload", b""))
+                except ValueError:
+                    logging.debug("Dropping malformed player state payload from %s", event.get("addr"))
+                    event["player_state"] = None
+            elif msg_type == MSG_PROJECTILE_STATE:
+                try:
+                    event["projectile_state"] = unpack_projectile_state(event.get("payload", b""))
+                except ValueError:
+                    logging.debug("Dropping malformed projectile state from %s", event.get("addr"))
+                    event["projectile_state"] = None
+            elif msg_type == MSG_ACTION:
+                try:
+                    event["action"] = unpack_action(event.get("payload", b""))
+                except ValueError:
+                    event["action"] = None
+        return events
+
+    def udp_connected(self) -> bool:
+        return bool(self._udp_client and self._udp_client.connected)
+
+    def send_udp_player_state(self, state: Dict[str, float]) -> bool:
+        """Send the player's current state over UDP."""
+        if not self._udp_client or not self._udp_enabled:
+            logging.debug("[udp] skip state send (udp disabled)")
+            return False
+        now = time.monotonic()
+        if now - self._last_udp_state_sent < self._udp_state_interval:
+            return False
+        payload = pack_player_state(
+            state.get("x", 0.0),
+            state.get("y", 0.0),
+            state.get("vx", 0.0),
+            state.get("vy", 0.0),
+            int(state.get("flags", 0)),
+            int(state.get("heading", 0)),
+        )
+        ok = self._udp_client.send(MSG_PLAYER_STATE, payload)
+        logging.debug("[udp] send state -> %s payload=%s", ok, state)
+        if ok:
+            self._last_udp_state_sent = now
+        return ok
+
+    def send_udp_action(self, action_type: int, param: int = 0, extra: int = 0, client_id: Optional[int] = None) -> bool:
+        if not self._udp_client or not self._udp_enabled:
+            logging.debug("[udp] skip action send (udp disabled)")
+            return False
+        payload = pack_action(action_type, param, extra)
+        ok = self._udp_client.send(MSG_ACTION, payload, client_id=client_id)
+        logging.debug("[udp] send action type=%s param=%s -> %s", action_type, param, ok)
+        return ok
+
+    def send_udp_projectile(self, projectile_id: int, x: float, y: float, vx: float, vy: float, flags: int, client_id: Optional[int] = None) -> bool:
+        if not self._udp_client or not self._udp_enabled:
+            return False
+        payload = pack_projectile_state(projectile_id, x, y, vx, vy, flags)
+        return self._udp_client.send(MSG_PROJECTILE_STATE, payload, client_id=client_id)
 
     # 非阻塞请求接口，配合轮询使用
     def request_room_list(self):

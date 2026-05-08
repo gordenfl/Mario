@@ -194,7 +194,8 @@ class Mario(EntityBase):
         self.dashboard.points += 100
 
     def gameOver(self):
-        srf = pygame.Surface((640, 480))
+        width, height = self.screen.get_size()
+        srf = pygame.Surface((width, height))
         srf.set_colorkey((255, 255, 255), pygame.RLEACCEL)
         srf.set_alpha(128)
         self.sound.music_channel.stop()
@@ -224,10 +225,18 @@ class Mario(EntityBase):
 
     def handle_fire_input(self, pressed: bool):
         if not self.canShoot:
+            try:
+                print(f"[debug] cannot shoot: canShoot={self.canShoot} fireCooldown={self.fireCooldown}")
+            except Exception:
+                pass
             self.fire_button_held = pressed
             return
         if pressed:
             if not self.fire_button_held and self.fireCooldown == 0:
+                try:
+                    print(f"[debug] queue fire: canShoot={self.canShoot} fireCooldown={self.fireCooldown}")
+                except Exception:
+                    pass
                 self._queue_fireball()
             self.fire_button_held = True
         else:

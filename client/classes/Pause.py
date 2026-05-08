@@ -11,7 +11,8 @@ class Pause:
         self.dashboard = dashboard
         self.state = 0
         self.spritesheet = Spritesheet("./img/title_screen.png")
-        self.pause_srfc = GaussianBlur().filter(self.screen, 0, 0, 640, 480)
+        width, height = self.screen.get_size()
+        self.pause_srfc = GaussianBlur().filter(self.screen, 0, 0, width, height)
         self.dot = self.spritesheet.image_at(
             0, 150, 2, colorkey=[255, 0, 220], ignoreTileSize=True
         )
@@ -56,4 +57,5 @@ class Pause:
                         self.state += 1
 
     def createBackgroundBlur(self):
-        self.pause_srfc = GaussianBlur().filter(self.screen, 0, 0, 640, 480)
+        width, height = self.screen.get_size()
+        self.pause_srfc = GaussianBlur().filter(self.screen, 0, 0, width, height)

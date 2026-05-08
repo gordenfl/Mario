@@ -180,13 +180,33 @@ class Level:
     def drawLevel(self, camera):
         if not self.level:
             return
+        # Always paint a full-screen sky background so areas beyond map bounds
+        # do not appear as black bars on wider aspect ratios.
+        sky_sprite = self.sprites.spriteCollection.get("sky")
+        if sky_sprite and sky_sprite.image:
+            sky_img = sky_sprite.image
+            tile_w, tile_h = sky_img.get_width(), sky_img.get_height()
+            screen_w, screen_h = self.screen.get_width(), self.screen.get_height()
+            # Keep background anchored to world/camera space.
+            # This avoids the illusion that only entities moved while background stayed fixed.
+            x_offset = int(camera.x) % tile_w
+            for sy in range(0, screen_h + tile_h, tile_h):
+                for sx in range(-x_offset, screen_w + tile_w, tile_w):
+                    self.screen.blit(sky_img, (sx, sy))
+        else:
+            self.screen.fill((107, 181, 255))
+
         max_rows = len(self.level)
-        for y in range(0, min(15, max_rows)):
+        visible_rows = max(1, self.screen.get_height() // 32)
+        visible_cols = max(1, self.screen.get_width() // 32 + 2)
+        for y in range(0, min(visible_rows, max_rows)):
             row = self.level[y]
             if row is None:
                 continue
             max_cols = len(row)
-            for x in range(0 - int(camera.pos.x + 1), 20 - int(camera.pos.x - 1)):
+            start_x = 0 - int(camera.pos.x + 1)
+            end_x = visible_cols - int(camera.pos.x - 1)
+            for x in range(start_x, end_x):
                 if x < 0 or x >= max_cols:
                     continue
                 tile = row[x]

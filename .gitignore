@@ -1,1 +1,10 @@
 editor/__pycache__/main.cpython-311.pyc
+client/build/*
+client/dist/*
+client/main.spec
+*.pyc
+client/venv/*
+.DS_Store
+
+client_kivy/.DS_Store
+client_kivy/.venv/*

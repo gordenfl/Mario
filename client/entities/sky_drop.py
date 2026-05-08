@@ -46,7 +46,7 @@ class SkyDrop(EntityBase):
         self.vel.y += self.gravity
         self.pos_y += self.vel.y
         self.rect.y = int(self.pos_y)
-        level_height = len(self.level.level or []) * 32 if self.level.level else 480
+        level_height = len(self.level.level or []) * 32 if self.level.level else self.screen.get_height()
         if self.rect.top > level_height + 64:
             self.alive = None
             return
@@ -103,7 +103,7 @@ class SkyCoin(EntityBase):
     def update(self, camera):
         if not self.alive:
             return
-        level_height = len(self.level.level or []) * 32 if self.level.level else 480
+        level_height = len(self.level.level or []) * 32 if self.level.level else self.screen.get_height()
         if self.rect.top > level_height + 32:
             self.alive = None
             return
@@ -198,7 +198,7 @@ class SkyMushroom(EntityBase):
         elif self.just_landed:
             self.just_landed = False
 
-        level_height = len(self.level.level or []) * 32 if self.level.level else 480
+        level_height = len(self.level.level or []) * 32 if self.level.level else self.screen.get_height()
         if self.rect.top > level_height + 64:
             self.alive = None
             return
