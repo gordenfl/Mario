@@ -18,8 +18,14 @@ pip install -r client_kivy/requirements.txt
 python -m client_kivy
 ```
 
-### Notes
+### Assets
 
-- This is intentionally a minimal loop first (rendering uses simple shapes).
-- Next steps are to wire in the existing network lobby/game protocol and replace placeholder rendering with sprite textures.
+Sprites and tiles are loaded from the existing **`client/`** bundle (same JSON + PNG/GIF sheets as pygame):
+`client/sprites/*.json`, `client/img/tiles.png`, `client/img/characters.gif`, etc.
+
+Fireballs remain **vector circles** like the pygame client (no separate fire texture in repo).
+
+### Next steps
+
+- Wire in `client/network/` lobby + multiplayer sync screens.
 

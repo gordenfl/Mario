@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import List, Optional, Tuple
 
 from .rect import Rect
 
@@ -11,84 +11,191 @@ from .rect import Rect
 TILE = 32
 
 
-@dataclass(frozen=True)
-class TileCell:
-    x: int
-    y: int
-    kind: str
+@dataclass
+class CellTile:
+    """One cell in the pixel-art tile grid."""
+
+    sprite_key: Optional[str]  # SpriteRepository.static key like "ground", "bricks"
+    solid: bool
+    redraw_sky_below: bool = False
 
 
 class Level:
     """
-    Kivy-friendly level representation.
-    Uses the existing JSON format from `client/levels/*.json`.
-
-    Coordinates:
-    - World space is pixel space with origin at top-left (pygame-style).
-    - Rendering will convert to Kivy coordinates (origin bottom-left).
+    Level shaped like pygame `classes.Level`:
+    tiles[ty][tx] corresponds to tile column tx, tile row ty (same as pygame `self.level`).
     """
 
     def __init__(self) -> None:
-        self.length_tiles: int = 0
-        self.solid_cells: Set[Tuple[int, int]] = set()
-        self.decor_cells: List[TileCell] = []
+        self.length_tiles = 0
+        self.nrow = 0
+        self.ncol = 0
+        self.tiles: List[List[CellTile]] = []
+        self._solid: set[Tuple[int, int]] = set()
 
-    @staticmethod
-    def from_json(path: Path) -> "Level":
+    @classmethod
+    def from_json(cls, path: Path) -> "Level":
         raw = json.loads(path.read_text(encoding="utf-8"))
-        lvl = Level()
-        lvl.length_tiles = int(raw.get("length", 0))
-        objects: Dict[str, list] = raw.get("level", {}).get("objects", {}) or {}
-        layers: Dict[str, dict] = raw.get("level", {}).get("layers", {}) or {}
-
-        # Ground layer rectangles (solid)
-        ground_layer = layers.get("ground") or {}
-        gx0, gx1 = (ground_layer.get("x") or [0, 0])
-        gy0, gy1 = (ground_layer.get("y") or [0, 0])
-        for x in range(int(gx0), int(gx1)):
-            for y in range(int(gy0), int(gy1)):
-                lvl.solid_cells.add((x, y))
-
-        # Object tiles
-        for x, y in objects.get("ground", []):
-            lvl.solid_cells.add((int(x), int(y)))
-        for x, y in objects.get("bricks", []):
-            lvl.solid_cells.add((int(x), int(y)))
-        for x, y, length in objects.get("pipe", []):
-            x = int(x)
-            y = int(y)
-            length = int(length)
-            # Pipe head is 2 tiles wide, then body downwards.
-            lvl.solid_cells.add((x, y))
-            lvl.solid_cells.add((x + 1, y))
-            for i in range(1, length + 20):
-                lvl.solid_cells.add((x, y + i))
-                lvl.solid_cells.add((x + 1, y + i))
-
-        # Simple decor (non-solid) markers to draw later.
-        for x, y in objects.get("bush", []):
-            lvl.decor_cells.append(TileCell(int(x), int(y), "bush"))
-        for x, y in objects.get("cloud", []):
-            lvl.decor_cells.append(TileCell(int(x), int(y), "cloud"))
-
+        lvl = cls()
+        lvl.length_tiles = max(1, int(raw.get("length", 1)))
+        data_level = raw.get("level", {})
+        lvl._build_blank_from_layers(data_level)
+        lvl._apply_objects(data_level.get("objects", {}) or {})
+        lvl._index_solids()
         return lvl
+
+    def _ensure_size(self, needed_rows: int, needed_cols: int) -> None:
+        if needed_cols > self.ncol:
+            sky_cell = lambda: CellTile(sprite_key="sky", solid=False, redraw_sky_below=False)
+            for row in self.tiles:
+                while len(row) < needed_cols:
+                    row.append(sky_cell())
+            self.ncol = needed_cols
+
+        sky_row = lambda: [
+            CellTile(sprite_key="sky", solid=False, redraw_sky_below=False)
+            for _ in range(self.ncol)
+        ]
+
+        while len(self.tiles) < needed_rows:
+            self.tiles.append(sky_row())
+        self.nrow = len(self.tiles)
+
+    def _build_blank_from_layers(self, data: dict) -> None:
+        layers = data["layers"]
+        sky_range = tuple(layers["sky"]["x"])
+        sky_y_range = tuple(layers["sky"]["y"])
+        ground_y_range = tuple(layers["ground"]["y"])
+
+        ncol = max(sky_range[1] - sky_range[0], self.length_tiles)
+        ncol = max(1, ncol)
+
+        sky_rows = sky_y_range[1] - sky_y_range[0]
+        ground_rows = ground_y_range[1] - ground_y_range[0]
+        nrow = sky_rows + ground_rows
+        nrow = max(1, nrow)
+
+        self.ncol = ncol
+        self.length_tiles = max(self.length_tiles, ncol)
+        self.tiles = []
+        sky_cell = lambda: CellTile(sprite_key="sky", solid=False, redraw_sky_below=False)
+        ground_cell = lambda: CellTile(
+            sprite_key="ground", solid=True, redraw_sky_below=False
+        )
+
+        for ry in range(nrow):
+            row: List[CellTile] = []
+            if ry < sky_rows:
+                row = [sky_cell() for _ in range(ncol)]
+            else:
+                row = [ground_cell() for _ in range(ncol)]
+            self.tiles.append(row)
+        self.nrow = nrow
+
+    def _in_bounds(self, tx: int, ty: int) -> bool:
+        return 0 <= ty < len(self.tiles) and tx >= 0 and tx < len(self.tiles[ty])
+
+    def _apply_objects(self, objects: dict) -> None:
+
+        for x, y in objects.get("ground", []):
+            tx, ty = int(x), int(y)
+            self._ensure_size(ty + 1, tx + 1)
+            if self._in_bounds(tx, ty):
+                self.tiles[ty][tx] = CellTile(
+                    sprite_key="ground", solid=True, redraw_sky_below=False
+                )
+
+        for x, y in objects.get("bricks", []):
+            tx, ty = int(x), int(y)
+            self._ensure_size(ty + 1, tx + 1)
+            self.tiles[ty][tx] = CellTile(
+                sprite_key="bricks",
+                solid=True,
+                redraw_sky_below=False,
+            )
+
+        for item in objects.get("pipe", []):
+            if len(item) < 3:
+                continue
+            px, py, plen = int(item[0]), int(item[1]), int(item[2])
+            self._ensure_size(py + plen + 26, px + 4)
+            if not self._in_bounds(px, py):
+                continue
+            self.tiles[py][px] = CellTile(sprite_key="pipeL", solid=True, redraw_sky_below=False)
+            self.tiles[py][px + 1] = CellTile(
+                sprite_key="pipeR", solid=True, redraw_sky_below=True
+            )
+            for i in range(1, plen + 21):
+                row_y = py + i
+                if self._in_bounds(px, row_y):
+                    self.tiles[row_y][px] = CellTile(
+                        sprite_key="pipe2L",
+                        solid=True,
+                        redraw_sky_below=True,
+                    )
+                    self.tiles[row_y][px + 1] = CellTile(
+                        sprite_key="pipe2R",
+                        solid=True,
+                        redraw_sky_below=True,
+                    )
+
+        for x, y in objects.get("cloud", []):
+            base_x, base_y = int(x), int(y)
+            self._ensure_size(base_y + 3, base_x + 4)
+            pattern = ["cloud1_1", "cloud1_2", "cloud1_3", "cloud2_1", "cloud2_2", "cloud2_3"]
+            idx = 0
+            for yy in range(2):
+                for xx in range(3):
+                    if self._in_bounds(base_x + xx, base_y + yy):
+                        self.tiles[base_y + yy][base_x + xx] = CellTile(
+                            sprite_key=pattern[idx],
+                            solid=False,
+                            redraw_sky_below=True,
+                        )
+                    idx += 1
+
+        for x, y in objects.get("bush", []):
+            bx, by = int(x), int(y)
+            self._ensure_size(by + 1, bx + 4)
+            trio = ["bush_1", "bush_2", "bush_3"]
+            for i, key in enumerate(trio):
+                if self._in_bounds(bx + i, by):
+                    self.tiles[by][bx + i] = CellTile(
+                        sprite_key=key,
+                        solid=False,
+                        redraw_sky_below=True,
+                    )
+
+        # Sky patches (clear solid decorations back to sky)
+        for x, y in objects.get("sky", []):
+            tx, ty = int(x), int(y)
+            self._ensure_size(ty + 1, tx + 1)
+            cell = self.tiles[ty][tx]
+            if (
+                cell.solid
+                and cell.sprite_key
+                and (cell.sprite_key.startswith("pipe"))
+            ):
+                continue
+            self.tiles[ty][tx] = CellTile(
+                sprite_key="sky",
+                solid=False,
+                redraw_sky_below=False,
+            )
+
+        self.length_tiles = max(self.length_tiles, self.ncol)
+
+    def _index_solids(self) -> None:
+        self._solid.clear()
+        for ty, row in enumerate(self.tiles):
+            for tx, c in enumerate(row):
+                if c.solid:
+                    self._solid.add((tx, ty))
 
     def is_solid_at_pixel(self, x: float, y: float) -> bool:
         tx = int(x // TILE)
         ty = int(y // TILE)
-        return (tx, ty) in self.solid_cells
+        return (tx, ty) in self._solid
 
     def tile_rect(self, tx: int, ty: int) -> Rect:
         return Rect(tx * TILE, ty * TILE, TILE, TILE)
-
-    def iter_visible_tiles(self, camera_x: float, screen_w: float, screen_h: float):
-        start_tx = max(int((-camera_x) // TILE) - 2, 0)
-        end_tx = int(((-camera_x) + screen_w) // TILE) + 3
-        max_ty = int(screen_h // TILE) + 3
-        for (tx, ty) in self.solid_cells:
-            if ty < 0 or ty > max_ty:
-                continue
-            if tx < start_tx or tx > end_tx:
-                continue
-            yield tx, ty
-
