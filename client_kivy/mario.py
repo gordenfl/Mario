@@ -45,6 +45,8 @@ class Mario:
 
         self.hp = 30
         self.dead = False
+        self.coins = 0
+        self.mushrooms_eaten = 0
 
     def apply_controls(self, *, move_dir: float, jump: bool, fire: bool) -> None:
         if self.dead:

@@ -33,6 +33,8 @@ class Level:
         self.tiles: List[List[CellTile]] = []
         self._solid: set[Tuple[int, int]] = set()
         self._broken_tiles: List[Tuple[int, int]] = []
+        self.floating_coin_tiles: List[Tuple[int, int]] = []
+        self._initial_floating_coin_tiles: List[Tuple[int, int]] = []
 
     @classmethod
     def from_json(cls, path: Path) -> "Level":
@@ -42,6 +44,7 @@ class Level:
         data_level = raw.get("level", {})
         lvl._build_blank_from_layers(data_level)
         lvl._apply_objects(data_level.get("objects", {}) or {})
+        lvl._apply_entities(data_level.get("entities", {}) or {})
         lvl._index_solids()
         return lvl
 
@@ -185,6 +188,33 @@ class Level:
             )
 
         self.length_tiles = max(self.length_tiles, self.ncol)
+
+    def _apply_entities(self, entities: dict) -> None:
+        """Floating pickups from level JSON `entities` (same keys as pygame client)."""
+        self.floating_coin_tiles = []
+        for pair in entities.get("coin", []) or []:
+            if len(pair) >= 2:
+                self.floating_coin_tiles.append((int(pair[0]), int(pair[1])))
+        self._initial_floating_coin_tiles = list(self.floating_coin_tiles)
+
+    def reset_pickups(self) -> None:
+        """Restore floating coins for a new round (same GameView)."""
+        self.floating_coin_tiles = list(self._initial_floating_coin_tiles)
+
+    def collect_coin_pickups(self, rect: Rect) -> int:
+        """Remove floating coins overlapping Mario; return count collected."""
+        if not self.floating_coin_tiles:
+            return 0
+        remain: List[Tuple[int, int]] = []
+        taken = 0
+        for tx, ty in self.floating_coin_tiles:
+            tr = self.tile_rect(tx, ty)
+            if rect.colliderect(tr):
+                taken += 1
+            else:
+                remain.append((tx, ty))
+        self.floating_coin_tiles = remain
+        return taken
 
     def _index_solids(self) -> None:
         self._solid.clear()

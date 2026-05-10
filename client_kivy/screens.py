@@ -427,18 +427,120 @@ class LobbyScreen(Screen):
 
 
 class GameScreen(Screen):
-    """Placeholder game shell; embeds existing GameView."""
+    """Game shell: GameView + end-of-round summary overlay."""
 
     def __init__(self, **kw):
         super().__init__(**kw)
         self.room_ready_message: Optional[Dict[str, Any]] = None
         self._game_view: Optional[GameView] = None
 
+        self._root = FloatLayout()
+        self.add_widget(self._root)
+
+        self._summary_layer = FloatLayout(size_hint=(1, 1), opacity=0)
+        with self._summary_layer.canvas.before:
+            Color(0, 0, 0, 0.72)
+            self._sum_rect = Rectangle(pos=(0, 0), size=(100, 100))
+        self._summary_layer.bind(pos=self._resize_summary_bg, size=self._resize_summary_bg)
+
+        summary_anchor = AnchorLayout()
+        box = BoxLayout(
+            orientation="vertical",
+            spacing=dp(14),
+            padding=dp(24),
+            size_hint=(0.88, None),
+        )
+        box.bind(minimum_height=box.setter("height"))
+
+        self._sum_title = Label(
+            text="本局结束",
+            font_size="26sp",
+            color=(1, 1, 1, 1),
+            size_hint_y=None,
+            height=dp(40),
+            halign="center",
+            **text_font_kwargs(),
+        )
+        self._sum_winner = Label(
+            text="",
+            font_size="18sp",
+            color=(0.75, 1.0, 0.78, 1),
+            size_hint_y=None,
+            height=dp(36),
+            halign="center",
+            text_size=(None, None),
+            **text_font_kwargs(),
+        )
+        self._sum_loser = Label(
+            text="",
+            font_size="18sp",
+            color=(1.0, 0.78, 0.72, 1),
+            size_hint_y=None,
+            height=dp(36),
+            halign="center",
+            text_size=(None, None),
+            **text_font_kwargs(),
+        )
+        btn_wait = Button(text="返回大厅等待", size_hint_y=None, height=dp(48), **text_font_kwargs())
+        btn_wait.bind(on_press=self._on_summary_back_to_lobby)
+
+        box.add_widget(self._sum_title)
+        box.add_widget(self._sum_winner)
+        box.add_widget(self._sum_loser)
+        box.add_widget(btn_wait)
+        summary_anchor.add_widget(box)
+        self._summary_layer.add_widget(summary_anchor)
+        self._root.add_widget(self._summary_layer)
+
+    def _resize_summary_bg(self, *_args):
+        self._sum_rect.pos = self._summary_layer.pos
+        self._sum_rect.size = self._summary_layer.size
+
+    def _on_match_finished(self, payload: Dict[str, Any]) -> None:
+        self._show_match_summary(payload)
+
+    def _show_match_summary(self, payload: Dict[str, Any]) -> None:
+        lobby = self.manager.get_screen("lobby")
+        my_name = (getattr(lobby, "username", None) or "").strip()
+        wn = payload.get("winner")
+        ls = payload.get("loser")
+
+        def line(role_cn: str, name: Optional[str]) -> str:
+            if not name:
+                return f"{role_cn}：—"
+            if my_name and name == my_name:
+                return f"{role_cn}：{name}（你）"
+            return f"{role_cn}：{name}"
+
+        self._sum_winner.text = line("胜者", wn if isinstance(wn, str) else None)
+        ls_disp = ls if isinstance(ls, str) else None
+        self._sum_loser.text = line("败者", ls_disp)
+        self._summary_layer.disabled = False
+        self._summary_layer.opacity = 1
+        # Always stack above GameView (last child draws on top in FloatLayout).
+        if self._summary_layer.parent == self._root:
+            self._root.remove_widget(self._summary_layer)
+            self._root.add_widget(self._summary_layer)
+
+    def _on_summary_back_to_lobby(self, *_args):
+        self._summary_layer.opacity = 0
+        lobby = self.manager.get_screen("lobby")
+        lobby.waiting = False
+        lobby.waiting_room_id = None
+        lobby.overlay.opacity = 0
+        lobby.message = "请选择房间加入，或创建房间等待对手。"
+        lobby.msg_lbl.text = lobby.message
+        if lobby.network:
+            lobby.network.request_room_list()
+        self.manager.current = "lobby"
+
     def on_enter(self):
-        # Lazy-create GameView once (Clock + game loop tied to widget lifecycle).
+        self._summary_layer.opacity = 0
         if self._game_view is None:
             self._game_view = GameView()
-            self.add_widget(self._game_view)
+            self._root.add_widget(self._game_view, index=0)
+        # Bind before configure_online / first tick so death → settlement always has a callback.
+        self._game_view.match_end_callback = self._on_match_finished
         lobby = self.manager.get_screen("lobby")
         net = getattr(lobby, "network", None)
         uname = getattr(lobby, "username", "") or ""
@@ -446,6 +548,7 @@ class GameScreen(Screen):
             self._game_view.configure_online(net, uname, self.room_ready_message)
         else:
             self._game_view.configure_offline()
+        self._game_view.set_local_username(uname)
 
     def on_leave(self):
         if self._game_view is not None:
