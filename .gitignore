@@ -8,3 +8,8 @@ client/venv/*
 
 client_kivy/.DS_Store
 client_kivy/.venv/*
+
+# kivy-ios：若曾在仓库旁生成工程，可自行取消注释
+# *-ios/
+# build/
+# dist/

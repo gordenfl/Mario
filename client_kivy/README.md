@@ -25,7 +25,7 @@ Sprites and tiles are loaded from the existing **`client/`** bundle (same JSON +
 
 Fireballs remain **vector circles** like the pygame client (no separate fire texture in repo).
 
-### Next steps
+### iOS 打包（Xcode / IPA）
 
-- Wire in `client/network/` lobby + multiplayer sync screens.
+仓库根目录 **`main.py`** 供 kivy-ios 使用；完整步骤见 **`BuildIOSWITHPYTHON.md`**。
 
