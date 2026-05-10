@@ -32,7 +32,11 @@ from .effects import BrickDebrisSystem
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
-from client.network.protocol import MSG_PLAYER_STATE
+from client.network.protocol import (
+    ACTION_FIRE,
+    MSG_PLAYER_STATE,
+    MSG_PROJECTILE_STATE,
+)
 
 
 def _world_to_kivy_y(screen_h: float, y_top: float, tex_h: float) -> float:
@@ -64,10 +68,15 @@ class GameView(Widget):
 
     HUD_BAR_H = 34.0
     HUD_PAD_X = 12.0
-    HUD_COIN_ICON_X = 118.0
-    HUD_MUSH_ICON_X = 248.0
-    HUD_COIN_TEXT_X = 146.0
-    HUD_MUSH_TEXT_X = 276.0
+    MARIO_MAX_HP = 30
+    HUD_HP_BAR_W = 120.0
+    HUD_HP_BAR_H = 16.0
+    HUD_HP_GAP_AFTER = 16.0
+    # Coin / mushroom icons sit to the right of the HP bar (virtual coords).
+    HUD_COIN_ICON_X = HUD_PAD_X + HUD_HP_BAR_W + HUD_HP_GAP_AFTER
+    HUD_COIN_TEXT_X = HUD_COIN_ICON_X + 28.0
+    HUD_MUSH_ICON_X = HUD_COIN_ICON_X + 130.0
+    HUD_MUSH_TEXT_X = HUD_MUSH_ICON_X + 28.0
     # Larger = slower coin spin (game ticks per sprite frame at ~60Hz).
     COIN_ANIM_TICK_STRIDE = 10
 
@@ -143,17 +152,8 @@ class GameView(Widget):
         )
         self.add_widget(self._pos_corner_lbl)
 
-        self._hud_hp_lbl = _PassthroughLabel(
-            text="HP 30",
-            font_size="15sp",
-            color=(1.0, 1.0, 1.0, 1.0),
-            size_hint=(None, None),
-            halign="left",
-            valign="middle",
-            **text_font_kwargs(),
-        )
         self._hud_coin_lbl = _PassthroughLabel(
-            text="0",
+            text="X 0",
             font_size="15sp",
             color=(1.0, 1.0, 1.0, 1.0),
             size_hint=(None, None),
@@ -162,7 +162,7 @@ class GameView(Widget):
             **text_font_kwargs(),
         )
         self._hud_mush_lbl = _PassthroughLabel(
-            text="0",
+            text="X 0",
             font_size="15sp",
             color=(1.0, 1.0, 1.0, 1.0),
             size_hint=(None, None),
@@ -170,7 +170,7 @@ class GameView(Widget):
             valign="middle",
             **text_font_kwargs(),
         )
-        for w in (self._hud_hp_lbl, self._hud_coin_lbl, self._hud_mush_lbl):
+        for w in (self._hud_coin_lbl, self._hud_mush_lbl):
             self.add_widget(w)
 
         self._remote_name_lbls: Dict[str, _PassthroughLabel] = {}
@@ -380,6 +380,7 @@ class GameView(Widget):
         self.mario.coins = 0
         self.mario.mushrooms_eaten = 0
         self.mushrooms.clear()
+        self.projectiles.clear()
         self.level.reset_pickups()
         self._fall_reported = False
         self._game_over_payload = None
@@ -413,26 +414,22 @@ class GameView(Widget):
         self._pos_corner_lbl.pos = (ox + pad_x * s, oy + pad_y * s)
 
     def _layout_hud(self) -> None:
-        """HP / coin / mushroom counters — virtual top strip, window-mapped like name tags."""
+        """Coin / mushroom labels (HP is drawn as a bar in `_draw_hud_strip`)."""
         self._compute_view_transform()
         h = float(self.VIRTUAL_H)
         s = self._view_scale or 1.0
         ox, oy = self._view_offset
         bar_h = self.HUD_BAR_H
 
-        self._hud_hp_lbl.text = f"HP {self.mario.hp}"
-        self._hud_coin_lbl.text = str(self.mario.coins)
-        self._hud_mush_lbl.text = str(self.mario.mushrooms_eaten)
+        self._hud_coin_lbl.text = f"X {self.mario.coins}"
+        self._hud_mush_lbl.text = f"X {self.mario.mushrooms_eaten}"
 
-        for lbl in (self._hud_hp_lbl, self._hud_coin_lbl, self._hud_mush_lbl):
+        for lbl in (self._hud_coin_lbl, self._hud_mush_lbl):
             tw, th = lbl.texture_size
             lbl.size = (max(tw, 1), max(th, 1))
 
-        nh = max(self._hud_hp_lbl.texture_size[1], 1)
+        nh = max(self._hud_coin_lbl.texture_size[1], 1)
         row_bottom_v = h - bar_h + max(0.0, (bar_h - nh) * 0.5)
-
-        pad_x = self.HUD_PAD_X
-        self._hud_hp_lbl.pos = (ox + pad_x * s, oy + row_bottom_v * s)
 
         self._hud_coin_lbl.pos = (ox + self.HUD_COIN_TEXT_X * s, oy + row_bottom_v * s)
 
@@ -635,34 +632,48 @@ class GameView(Widget):
         for message in self._net.poll():
             self._handle_tcp_game_message(message)
 
-    def _poll_udp_and_send_if_alive(self) -> None:
+    def _receive_udp(self) -> None:
         if not self._net:
             return
         for msg_type, event in self._net.poll_udp():
-            if msg_type != MSG_PLAYER_STATE:
-                continue
-            sender_id = event.get("client_id")
-            if sender_id is None or sender_id == self._local_udp_id:
-                continue
-            uname = self._udp_username_map.get(int(sender_id))
-            if not uname:
-                continue
-            remote = self._remotes.get(uname)
-            if not remote:
-                continue
-            ps = event.get("player_state")
-            if ps is None:
-                continue
-            remote.apply_udp(ps, event.get("timestamp"))
+            if msg_type == MSG_PLAYER_STATE:
+                sender_id = event.get("client_id")
+                if sender_id is None or sender_id == self._local_udp_id:
+                    continue
+                uname = self._udp_username_map.get(int(sender_id))
+                if not uname:
+                    continue
+                remote = self._remotes.get(uname)
+                if not remote:
+                    continue
+                ps = event.get("player_state")
+                if ps is None:
+                    continue
+                remote.apply_udp(ps, event.get("timestamp"))
+            elif msg_type == MSG_PROJECTILE_STATE:
+                state = event.get("projectile_state")
+                if state is None:
+                    continue
+                sender_id = event.get("client_id")
+                if sender_id is None:
+                    continue
+                owner_name = self._udp_username_map.get(int(sender_id))
+                if owner_name is None:
+                    continue
+                proj_id = state.get("projectile_id")
+                if proj_id is None:
+                    continue
+                proj_key = f"udp_{proj_id}"
+                self.projectiles.upsert_from_udp(proj_key, owner_name, state, self.level)
 
+    def _flush_udp_outbound(self) -> None:
+        if not self._net:
+            return
         self._net.send_udp_player_state(collect_udp_state_kivy(self.mario))
         now = time.monotonic()
         if now - self._last_tcp_sync >= 0.5:
             self._net.send_state(collect_tcp_state_kivy(self.mario))
             self._last_tcp_sync = now
-
-    def _poll_multiplayer(self) -> None:
-        self._poll_udp_and_send_if_alive()
 
     def _handle_tcp_game_message(self, message: dict) -> None:
         t = message.get("type")
@@ -730,7 +741,7 @@ class GameView(Widget):
             return
 
         if self._online and self._net:
-            self._poll_udp_and_send_if_alive()
+            self._receive_udp()
 
         joy = self.controls.joy
         move_dir = joy.move_dir
@@ -768,12 +779,41 @@ class GameView(Widget):
 
         if self.mario.consume_fire():
             direction = self.mario.heading or 1
-            self.projectiles.spawn_fireball(
-                self.mario.rect.centerx + direction * 20,
-                self.mario.rect.centery - 10,
-                direction,
-            )
-        self.projectiles.update(self.level)
+            if self._online and self._net and self._local_udp_id is not None:
+                self._net.send_udp_action(
+                    ACTION_FIRE,
+                    param=1 if direction >= 0 else 0,
+                    client_id=self._local_udp_id,
+                )
+            else:
+                self.projectiles.spawn_offline(
+                    self.mario.rect.centerx + direction * 20,
+                    self.mario.rect.centery - 10,
+                    direction,
+                    self.level,
+                )
+
+        level_w = max(float(self.level.length_tiles * TILE), self.VIRTUAL_W)
+        projectile_sends = self.projectiles.step(
+            self.level,
+            level_w,
+            online=bool(self._online),
+            local_username=self._username,
+            remotes=self._remotes,
+        )
+        if self._online and self._net and self._local_udp_id is not None:
+            for pid, x, y, vx, vy, flags, hit_target in projectile_sends:
+                self._net.send_udp_projectile(pid, x, y, vx, vy, flags, client_id=self._local_udp_id)
+                if hit_target:
+                    self._net.send_player_hit(hit_target, damage=5)
+
+        self.projectiles.cull_hits_local_player(
+            self.mario.rect,
+            online=bool(self._online),
+            local_username=self._username,
+            mario_dead=self.mario.dead,
+        )
+
         self.effects.update()
 
         # Brick break events -> debris (local only; remotes use TCP + record_break=False)
@@ -787,6 +827,9 @@ class GameView(Widget):
             if self._online and self._net:
                 for tx, ty in broken:
                     self._net.send_tile_break(tx, ty)
+
+        if self._online and self._net:
+            self._flush_udp_outbound()
 
         # Camera is computed in *virtual* pixels, independent of window scaling.
         target = -self.mario.rect.centerx + self.VIRTUAL_W * 0.5
@@ -910,10 +953,25 @@ class GameView(Widget):
             Rectangle(texture=tex, pos=(px, py), size=(tw2, th2))
 
     def _draw_hud_strip(self, w: float, h: float) -> None:
-        """Top bar + coin/mushroom icons (counts are separate `Label` widgets)."""
+        """Top bar: HP progress bar (left), coin/mushroom icons + counts (labels)."""
         bar_h = self.HUD_BAR_H
         Color(0.0, 0.0, 0.0, 0.48)
         Rectangle(pos=(0.0, h - bar_h), size=(w, bar_h))
+
+        max_hp = float(self.MARIO_MAX_HP)
+        cur = max(0.0, min(float(self.mario.hp), max_hp))
+        ratio = cur / max_hp if max_hp > 0 else 0.0
+
+        bx = self.HUD_PAD_X
+        bw = self.HUD_HP_BAR_W
+        bh = self.HUD_HP_BAR_H
+        by = h - bar_h + max(0.0, (bar_h - bh) * 0.5)
+
+        Color(0.22, 0.22, 0.24, 1.0)
+        Rectangle(pos=(bx, by), size=(bw, bh))
+        if ratio > 0.0:
+            Color(0.22, 0.82, 0.32, 1.0)
+            Rectangle(pos=(bx, by), size=(bw * ratio, bh))
 
         slot = 22.0
         icon_max = 20.0
@@ -1019,7 +1077,7 @@ class GameView(Widget):
             Rectangle(texture=tex, pos=(px, py), size=(tw2, th2))
 
     def _redraw_fireballs(self, h: float):
-        for fb in self.projectiles.fireballs:
+        for fb in self.projectiles.by_key.values():
             r = fb.rect
             px = r.x + self.camera_x
             py = _world_to_kivy_y(h, r.y, r.h)
