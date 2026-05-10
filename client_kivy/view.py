@@ -12,7 +12,7 @@ from kivy.graphics import Color, Ellipse, PopMatrix, PushMatrix, Rectangle, Scal
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
-from .font_config import text_font_kwargs
+from .font_config import get_ui_font_name, text_font_kwargs
 from .input import TouchControls
 from .level import TILE, Level
 from .mario import Mario
@@ -72,11 +72,11 @@ class GameView(Widget):
     HUD_HP_BAR_W = 120.0
     HUD_HP_BAR_H = 16.0
     HUD_HP_GAP_AFTER = 16.0
-    # Coin / mushroom icons sit to the right of the HP bar (virtual coords).
-    HUD_COIN_ICON_X = HUD_PAD_X + HUD_HP_BAR_W + HUD_HP_GAP_AFTER
-    HUD_COIN_TEXT_X = HUD_COIN_ICON_X + 28.0
-    HUD_MUSH_ICON_X = HUD_COIN_ICON_X + 130.0
-    HUD_MUSH_TEXT_X = HUD_MUSH_ICON_X + 28.0
+    HUD_HP_TAG_GAP = 6.0
+    # Horizontal spacing between coin and mushroom icon columns (virtual px).
+    HUD_COIN_MUSH_ICON_GAP = 130.0
+    # Text drawn to the right of each icon column (see `_draw_hud_strip`).
+    HUD_COUNT_TEXT_AFTER_ICON = 28.0
     # Larger = slower coin spin (game ticks per sprite frame at ~60Hz).
     COIN_ANIM_TICK_STRIDE = 10
 
@@ -151,27 +151,6 @@ class GameView(Widget):
             **text_font_kwargs(),
         )
         self.add_widget(self._pos_corner_lbl)
-
-        self._hud_coin_lbl = _PassthroughLabel(
-            text="X 0",
-            font_size="15sp",
-            color=(1.0, 1.0, 1.0, 1.0),
-            size_hint=(None, None),
-            halign="left",
-            valign="middle",
-            **text_font_kwargs(),
-        )
-        self._hud_mush_lbl = _PassthroughLabel(
-            text="X 0",
-            font_size="15sp",
-            color=(1.0, 1.0, 1.0, 1.0),
-            size_hint=(None, None),
-            halign="left",
-            valign="middle",
-            **text_font_kwargs(),
-        )
-        for w in (self._hud_coin_lbl, self._hud_mush_lbl):
-            self.add_widget(w)
 
         self._remote_name_lbls: Dict[str, _PassthroughLabel] = {}
 
@@ -395,7 +374,6 @@ class GameView(Widget):
         self._refit_overlay_text()
         self._layout_name_tags()
         self._layout_corner_position()
-        self._layout_hud()
         self._raise_corner_label_to_front()
 
     def _layout_corner_position(self) -> None:
@@ -412,28 +390,6 @@ class GameView(Widget):
         ox, oy = self._view_offset
         s = self._view_scale or 1.0
         self._pos_corner_lbl.pos = (ox + pad_x * s, oy + pad_y * s)
-
-    def _layout_hud(self) -> None:
-        """Coin / mushroom labels (HP is drawn as a bar in `_draw_hud_strip`)."""
-        self._compute_view_transform()
-        h = float(self.VIRTUAL_H)
-        s = self._view_scale or 1.0
-        ox, oy = self._view_offset
-        bar_h = self.HUD_BAR_H
-
-        self._hud_coin_lbl.text = f"X {self.mario.coins}"
-        self._hud_mush_lbl.text = f"X {self.mario.mushrooms_eaten}"
-
-        for lbl in (self._hud_coin_lbl, self._hud_mush_lbl):
-            tw, th = lbl.texture_size
-            lbl.size = (max(tw, 1), max(th, 1))
-
-        nh = max(self._hud_coin_lbl.texture_size[1], 1)
-        row_bottom_v = h - bar_h + max(0.0, (bar_h - nh) * 0.5)
-
-        self._hud_coin_lbl.pos = (ox + self.HUD_COIN_TEXT_X * s, oy + row_bottom_v * s)
-
-        self._hud_mush_lbl.pos = (ox + self.HUD_MUSH_TEXT_X * s, oy + row_bottom_v * s)
 
     def _local_mario_sprite_top_virtual(self, h: float) -> tuple[float, float]:
         """Sprite top for HUD; uses death sprite while dead."""
@@ -952,20 +908,36 @@ class GameView(Widget):
             py = _world_to_kivy_y(h, m.rect.y, th2)
             Rectangle(texture=tex, pos=(px, py), size=(tw2, th2))
 
+    def _hud_raster_text(self, text: str, font_size: float = 15.0):
+        """Raster HUD strings onto canvas (same coords as HP strip); avoids Label widget stacking issues."""
+        from kivy.core.text import Label as CoreLabel
+
+        opts: Dict[str, Any] = {"text": text, "font_size": font_size, "color": (1, 1, 1, 1)}
+        fn = get_ui_font_name()
+        if fn:
+            opts["font_name"] = fn
+        core = CoreLabel(**opts)
+        core.refresh()
+        return core.texture
+
     def _draw_hud_strip(self, w: float, h: float) -> None:
-        """Top bar: HP progress bar (left), coin/mushroom icons + counts (labels)."""
+        """Top bar: HP tag + progress bar, coin/mushroom icons + X count text (canvas)."""
         bar_h = self.HUD_BAR_H
         Color(0.0, 0.0, 0.0, 0.48)
         Rectangle(pos=(0.0, h - bar_h), size=(w, bar_h))
 
+        bh = self.HUD_HP_BAR_H
+        by = h - bar_h + max(0.0, (bar_h - bh) * 0.5)
+
+        tex_hp = self._hud_raster_text("HP")
+        tag_w = float(tex_hp.width) if tex_hp else 26.0
+        tag_th = float(tex_hp.height) if tex_hp else bh
+        bx = self.HUD_PAD_X + tag_w + self.HUD_HP_TAG_GAP
+        bw = self.HUD_HP_BAR_W
+
         max_hp = float(self.MARIO_MAX_HP)
         cur = max(0.0, min(float(self.mario.hp), max_hp))
         ratio = cur / max_hp if max_hp > 0 else 0.0
-
-        bx = self.HUD_PAD_X
-        bw = self.HUD_HP_BAR_W
-        bh = self.HUD_HP_BAR_H
-        by = h - bar_h + max(0.0, (bar_h - bh) * 0.5)
 
         Color(0.22, 0.22, 0.24, 1.0)
         Rectangle(pos=(bx, by), size=(bw, bh))
@@ -973,9 +945,17 @@ class GameView(Widget):
             Color(0.22, 0.82, 0.32, 1.0)
             Rectangle(pos=(bx, by), size=(bw * ratio, bh))
 
+        if tex_hp:
+            ty = by + max(0.0, (bh - tag_th) * 0.5)
+            Color(1, 1, 1, 1)
+            Rectangle(texture=tex_hp, pos=(self.HUD_PAD_X, ty), size=tex_hp.size)
+
         slot = 22.0
         icon_max = 20.0
         y_slot_bottom = h - bar_h + (bar_h - slot) * 0.5
+
+        coin_icon_x = bx + bw + self.HUD_HP_GAP_AFTER
+        mush_icon_x = coin_icon_x + self.HUD_COIN_MUSH_ICON_GAP
 
         ani = self.sprite_repo.animated.get("coin")
         if ani and ani.frames:
@@ -988,7 +968,7 @@ class GameView(Widget):
             Rectangle(
                 texture=tex,
                 pos=(
-                    self.HUD_COIN_ICON_X + (slot - dw) * 0.5,
+                    coin_icon_x + (slot - dw) * 0.5,
                     y_slot_bottom + (slot - dh) * 0.5,
                 ),
                 size=(dw, dh),
@@ -1003,10 +983,32 @@ class GameView(Widget):
             Rectangle(
                 texture=tex,
                 pos=(
-                    self.HUD_MUSH_ICON_X + (slot - dw) * 0.5,
+                    mush_icon_x + (slot - dw) * 0.5,
                     y_slot_bottom + (slot - dh) * 0.5,
                 ),
                 size=(dw, dh),
+            )
+
+        coin_txt = self._hud_raster_text(f"X {self.mario.coins}")
+        if coin_txt:
+            _, cth = coin_txt.size
+            cty = by + max(0.0, (bh - cth) * 0.5)
+            Color(1, 1, 1, 1)
+            Rectangle(
+                texture=coin_txt,
+                pos=(coin_icon_x + self.HUD_COUNT_TEXT_AFTER_ICON, cty),
+                size=coin_txt.size,
+            )
+
+        mush_txt = self._hud_raster_text(f"X {self.mario.mushrooms_eaten}")
+        if mush_txt:
+            _, mth = mush_txt.size
+            mty = by + max(0.0, (bh - mth) * 0.5)
+            Color(1, 1, 1, 1)
+            Rectangle(
+                texture=mush_txt,
+                pos=(mush_icon_x + self.HUD_COUNT_TEXT_AFTER_ICON, mty),
+                size=mush_txt.size,
             )
 
     def _redraw_mario(self, h: float):
@@ -1136,6 +1138,4 @@ class GameView(Widget):
 
         self._layout_name_tags()
         self._layout_corner_position()
-        self._layout_hud()
-        self._raise_corner_label_to_front()
         self._raise_corner_label_to_front()

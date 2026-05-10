@@ -15,7 +15,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
-from kivy.uix.screenmanager import Screen, ScreenManager
+from kivy.uix.screenmanager import NoTransition, Screen, ScreenManager
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
@@ -336,9 +336,17 @@ class LobbyScreen(Screen):
         elif msg_type == "room_ready":
             game = self.manager.get_screen("game")
             game.room_ready_message = message
-            self.manager.current = "game"
             self.waiting = False
+            self.waiting_room_id = None
             self.overlay.opacity = 0
+            # Players keep client.room_id set, so the server does not include them in
+            # broadcast_rooms_to_lobby — joiners never get a fresh rooms snapshot here.
+            # Clear stale list so the room they joined does not stay visible until next fetch.
+            self.rooms = []
+            self._rebuild_room_buttons()
+            self.message = "对局中…"
+            self.msg_lbl.text = self.message
+            self.manager.current = "game"
         elif msg_type == "room_peer_left":
             self.waiting = False
             self.waiting_room_id = None
@@ -545,7 +553,11 @@ class GameScreen(Screen):
             except Exception:
                 pass
             lobby.network.request_room_list()
-        self.manager.current = "lobby"
+        sm = self.manager
+        t_prev = sm.transition
+        sm.transition = NoTransition()
+        sm.current = "lobby"
+        sm.transition = t_prev
 
     def on_enter(self):
         self._summary_layer.opacity = 0
