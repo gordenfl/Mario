@@ -32,6 +32,7 @@ class Level:
         self.ncol = 0
         self.tiles: List[List[CellTile]] = []
         self._solid: set[Tuple[int, int]] = set()
+        self._broken_tiles: List[Tuple[int, int]] = []
 
     @classmethod
     def from_json(cls, path: Path) -> "Level":
@@ -191,6 +192,52 @@ class Level:
             for tx, c in enumerate(row):
                 if c.solid:
                     self._solid.add((tx, ty))
+
+    def get_cell(self, tx: int, ty: int) -> Optional[CellTile]:
+        if not self._in_bounds(tx, ty):
+            return None
+        return self.tiles[ty][tx]
+
+    def set_cell(self, tx: int, ty: int, cell: CellTile) -> None:
+        if not self._in_bounds(tx, ty):
+            return
+        self.tiles[ty][tx] = cell
+        if cell.solid:
+            self._solid.add((tx, ty))
+        else:
+            self._solid.discard((tx, ty))
+
+    def break_tile(self, tx: int, ty: int) -> bool:
+        cell = self.get_cell(tx, ty)
+        if not cell:
+            return False
+        if cell.sprite_key != "bricks":
+            return False
+        # Replace with sky (non-solid).
+        self.set_cell(tx, ty, CellTile(sprite_key="sky", solid=False, redraw_sky_below=False))
+        self._broken_tiles.append((tx, ty))
+        return True
+
+    def consume_broken_tiles(self) -> List[Tuple[int, int]]:
+        if not self._broken_tiles:
+            return []
+        out = self._broken_tiles[:]
+        self._broken_tiles.clear()
+        return out
+
+    def handle_tile_hit_from_below(self, tx: int, ty: int, entity) -> bool:
+        """
+        Match legacy `client/classes/Level.handle_tile_hit_from_below`.
+        Kivy client currently always uses a 'big' Mario, so bricks are breakable.
+        """
+        cell = self.get_cell(tx, ty)
+        if not cell:
+            return False
+        if cell.sprite_key == "bricks":
+            power = int(getattr(entity, "power_state", 2))
+            if power >= 1:
+                return self.break_tile(tx, ty)
+        return False
 
     def is_solid_at_pixel(self, x: float, y: float) -> bool:
         tx = int(x // TILE)

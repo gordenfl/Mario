@@ -12,6 +12,7 @@ from .level import TILE, Level
 from .mario import Mario
 from .projectiles import ProjectileSystem
 from .sprites_loader import SpriteRepository, mario_pick_frame_name
+from .effects import BrickDebrisSystem
 
 
 def _world_to_kivy_y(screen_h: float, y_top: float, tex_h: float) -> float:
@@ -32,6 +33,7 @@ class GameView(Widget):
         self.level = Level.from_json(self.CLIENT_ROOT / "levels" / "Level1-1.json")
         self.mario = Mario(2, 10, self.level)
         self.projectiles = ProjectileSystem()
+        self.effects = BrickDebrisSystem()
         self.camera_x = 0.0
         self._dt = 1.0 / 60.0
         self._tick_i = 0
@@ -79,6 +81,16 @@ class GameView(Widget):
                 direction,
             )
         self.projectiles.update(self.level)
+        self.effects.update()
+
+        # Brick break events -> debris
+        broken = self.level.consume_broken_tiles()
+        if broken:
+            bricks = self.sprite_repo.static.get("bricks")
+            if bricks:
+                btex, bwh = bricks
+                for tx, ty in broken:
+                    self.effects.spawn_brick_break(tx, ty, btex, bwh)
 
         # Camera is computed in *virtual* pixels, independent of window scaling.
         target = -self.mario.rect.centerx + self.VIRTUAL_W * 0.5
@@ -225,6 +237,7 @@ class GameView(Widget):
 
             self._redraw_mario(h)
             self._redraw_fireballs(h)
+            self.effects.draw(self.canvas, self.camera_x, self.VIRTUAL_H)
 
             if self.controls.joy.active:
                 cx, cy = self.controls.joy.center

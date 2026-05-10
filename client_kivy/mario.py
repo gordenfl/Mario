@@ -20,6 +20,19 @@ class Mario:
         self.gravity = 0.8
         self.on_ground = False
         self.heading = 1  # 1 right, -1 left
+        # Keep parity with legacy client powerUpState: 0 small, 1 big, 2 fire.
+        # Kivy client currently starts as big+fire visuals.
+        self.power_state = 2
+        self.obey_gravity = True
+        self.in_jump = False
+        self.jump_start_y = 0.0
+        # Match legacy client JumpTrait tuning
+        self.jump_vertical_speed = -12.0
+        self.jump_height = 120.0
+        # deaccelerationHeight = jumpHeight - v^2/(2g)
+        self.jump_deaccel_height = self.jump_height - (
+            (self.jump_vertical_speed * self.jump_vertical_speed) / (2.0 * self.gravity)
+        )
 
         # Controls
         self.move_dir = 0.0  # [-1..1]
@@ -55,13 +68,22 @@ class Mario:
             elif self.vel.x < 0:
                 self.vel.x = min(0.0, self.vel.x + decel)
 
-        # Jump (up direction on joystick)
+        # Jump (match legacy client behavior: disable gravity briefly to guarantee max height)
         if self.jump_requested and self.on_ground:
-            self.vel.y = -11.5
+            self.vel.y = self.jump_vertical_speed
             self.on_ground = False
+            self.in_jump = True
+            self.jump_start_y = self.rect.y
+            self.obey_gravity = False
+
+        if self.in_jump:
+            if (self.jump_start_y - self.rect.y) >= self.jump_deaccel_height or self.vel.y == 0:
+                self.in_jump = False
+                self.obey_gravity = True
 
         # Gravity
-        self.vel.y += self.gravity
+        if self.obey_gravity:
+            self.vel.y += self.gravity
 
         # Integrate + collide Y then X (top-left coordinate system)
         self._move_y(self.vel.y)
@@ -132,7 +154,14 @@ class Mario:
                     self.rect.bottom = tile.top
                     self.on_ground = True
                 else:
+                    # Hit tile from below: allow bricks to break.
+                    # Use the tile directly above Mario's top edge.
+                    self.level.handle_tile_hit_from_below(tx, ty, self)
                     self.rect.top = tile.bottom
                 self.vel.y = 0.0
+                if self.on_ground:
+                    # Legacy JumpTrait.reset()
+                    self.in_jump = False
+                    self.obey_gravity = True
                 break
 
