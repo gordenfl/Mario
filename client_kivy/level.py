@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from .rect import Rect
 
@@ -35,6 +36,9 @@ class Level:
         self._broken_tiles: List[Tuple[int, int]] = []
         self.floating_coin_tiles: List[Tuple[int, int]] = []
         self._initial_floating_coin_tiles: List[Tuple[int, int]] = []
+        self.random_box_kind: Dict[Tuple[int, int], str] = {}
+        self.random_box_opened: Set[Tuple[int, int]] = set()
+        self._pending_mushroom_spawns: List[Tuple[float, float]] = []
 
     @classmethod
     def from_json(cls, path: Path) -> "Level":
@@ -189,17 +193,98 @@ class Level:
 
         self.length_tiles = max(self.length_tiles, self.ncol)
 
+    def _entity_reserved_tiles(self, entities: dict) -> Set[Tuple[int, int]]:
+        """Tiles used by blocks / items so floating coins should not spawn on top."""
+        blocked: Set[Tuple[int, int]] = set()
+        for key in ("CoinBox", "coinBrick"):
+            for pair in entities.get(key, []) or []:
+                if len(pair) >= 2:
+                    blocked.add((int(pair[0]), int(pair[1])))
+        for item in entities.get("RandomBox", []) or []:
+            if len(item) >= 2:
+                blocked.add((int(item[0]), int(item[1])))
+        return blocked
+
+    def _sample_floating_coin_positions(
+        self,
+        count: int,
+        rng: random.Random,
+        blocked: Set[Tuple[int, int]],
+    ) -> List[Tuple[int, int]]:
+        """Random empty air tiles: not solid (no ground/bricks/pipes) and not reserved."""
+        max_tx = min(self.ncol, self.length_tiles)
+        candidates: List[Tuple[int, int]] = []
+        for ty in range(self.nrow):
+            for tx in range(max_tx):
+                if (tx, ty) in blocked:
+                    continue
+                cell = self.tiles[ty][tx]
+                if cell.solid:
+                    continue
+                candidates.append((tx, ty))
+        if not candidates:
+            return []
+        count = min(count, len(candidates))
+        return rng.sample(candidates, count)
+
+    def _apply_random_boxes(self, entities: dict) -> None:
+        """Place ? blocks from `RandomBox` entries (solid, bumpable)."""
+        self.random_box_kind.clear()
+        for item in entities.get("RandomBox", []) or []:
+            if len(item) < 3:
+                continue
+            tx, ty, kind = int(item[0]), int(item[1]), str(item[2])
+            self._ensure_size(ty + 1, tx + 1)
+            self.tiles[ty][tx] = CellTile(
+                sprite_key="CoinBox",
+                solid=True,
+                redraw_sky_below=False,
+            )
+            self.random_box_kind[(tx, ty)] = kind
+
     def _apply_entities(self, entities: dict) -> None:
-        """Floating pickups from level JSON `entities` (same keys as pygame client)."""
-        self.floating_coin_tiles = []
-        for pair in entities.get("coin", []) or []:
-            if len(pair) >= 2:
-                self.floating_coin_tiles.append((int(pair[0]), int(pair[1])))
+        """
+        Random ? blocks, then floating coin pickups (non-solid, not reserved).
+        Coin JSON: floating_coin_count, floating_coin_seed; legacy `coin` list only sets default count.
+        """
+        self._apply_random_boxes(entities)
+        legacy_list = entities.get("coin", []) or []
+        default_count = len(legacy_list) if legacy_list else 28
+        count = int(entities.get("floating_coin_count", default_count))
+        count = max(0, count)
+
+        seed_raw = entities.get("floating_coin_seed")
+        if seed_raw is None:
+            rng_seed = (
+                self.length_tiles * 486187739 + self.ncol * 1315423911 + self.nrow * 9737333
+            ) & 0xFFFFFFFF
+        else:
+            rng_seed = int(seed_raw)
+        rng = random.Random(rng_seed)
+
+        blocked = self._entity_reserved_tiles(entities)
+        self.floating_coin_tiles = self._sample_floating_coin_positions(
+            count, rng, blocked
+        )
         self._initial_floating_coin_tiles = list(self.floating_coin_tiles)
 
     def reset_pickups(self) -> None:
         """Restore floating coins for a new round (same GameView)."""
         self.floating_coin_tiles = list(self._initial_floating_coin_tiles)
+        self.random_box_opened.clear()
+        self._pending_mushroom_spawns.clear()
+        for tx, ty in self.random_box_kind:
+            self.set_cell(
+                tx,
+                ty,
+                CellTile(sprite_key="CoinBox", solid=True, redraw_sky_below=False),
+            )
+
+    def pop_mushroom_spawns(self) -> List[Tuple[float, float]]:
+        """World spawn points `(center_x, top_y)` from bumping RandomBox tiles."""
+        out = self._pending_mushroom_spawns[:]
+        self._pending_mushroom_spawns.clear()
+        return out
 
     def collect_coin_pickups(self, rect: Rect) -> int:
         """Remove floating coins overlapping Mario; return count collected."""
@@ -261,6 +346,21 @@ class Level:
         Match legacy `client/classes/Level.handle_tile_hit_from_below`.
         Kivy client currently always uses a 'big' Mario, so bricks are breakable.
         """
+        if (tx, ty) in self.random_box_kind:
+            if (tx, ty) in self.random_box_opened:
+                return False
+            kind = self.random_box_kind[(tx, ty)]
+            self.random_box_opened.add((tx, ty))
+            self.set_cell(
+                tx,
+                ty,
+                CellTile(sprite_key="empty", solid=True, redraw_sky_below=False),
+            )
+            if kind == "RedMushroom":
+                cx = tx * TILE + TILE * 0.5
+                top_y = ty * TILE - 30.0
+                self._pending_mushroom_spawns.append((cx, top_y))
+            return True
         cell = self.get_cell(tx, ty)
         if not cell:
             return False

@@ -15,6 +15,7 @@ from .font_config import text_font_kwargs
 from .input import TouchControls
 from .level import TILE, Level
 from .mario import Mario
+from .mushrooms import MushroomSystem
 from .multiplayer import (
     build_remote_peers,
     build_udp_username_map,
@@ -66,6 +67,8 @@ class GameView(Widget):
     HUD_MUSH_ICON_X = 248.0
     HUD_COIN_TEXT_X = 146.0
     HUD_MUSH_TEXT_X = 276.0
+    # Larger = slower coin spin (game ticks per sprite frame at ~60Hz).
+    COIN_ANIM_TICK_STRIDE = 10
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -77,6 +80,7 @@ class GameView(Widget):
         self.mario = Mario(2, 10, self.level)
         self.projectiles = ProjectileSystem()
         self.effects = BrickDebrisSystem()
+        self.mushrooms = MushroomSystem()
         self.camera_x = 0.0
         self._dt = 1.0 / 60.0
         self._tick_i = 0
@@ -281,6 +285,7 @@ class GameView(Widget):
         self.mario.hp = 30
         self.mario.coins = 0
         self.mario.mushrooms_eaten = 0
+        self.mushrooms.clear()
         self.level.reset_pickups()
         self._fall_reported = False
         self._game_over_payload = None
@@ -652,6 +657,12 @@ class GameView(Widget):
         if n_coins:
             self.mario.coins += n_coins
 
+        for cx, top_y in self.level.pop_mushroom_spawns():
+            self.mushrooms.spawn(cx, top_y)
+        n_mush = self.mushrooms.update(self.level, self.mario.rect)
+        if n_mush:
+            self.mario.mushrooms_eaten += n_mush
+
         # Same rounding as client/network/protocol.pack_player_state so logs match gameplay.
         if int(round(self.mario.rect.y)) >= int(self.FALL_DEATH_Y):
             self._trigger_local_death(reason="fall")
@@ -753,6 +764,21 @@ class GameView(Widget):
                     size=(TILE, TILE),
                 )
 
+        if cell.sprite_key == "CoinBox":
+            ani = self.sprite_repo.animated.get("CoinBox")
+            if ani and ani.frames:
+                tex, (tw2, th2) = animated_frame_for(
+                    ani, self._tick_i // self.COIN_ANIM_TICK_STRIDE
+                )
+                Color(1, 1, 1, 1)
+                y_draw = screen_y_bottom_tile + (TILE - th2)
+                Rectangle(
+                    texture=tex,
+                    pos=(sx + (TILE - tw2) / 2, y_draw),
+                    size=(tw2, th2),
+                )
+            return
+
         if cell.sprite_key and cell.sprite_key != "sky":
             tup = self.sprite_repo.static.get(cell.sprite_key)
             if not tup:
@@ -767,7 +793,9 @@ class GameView(Widget):
         ani = self.sprite_repo.animated.get("coin")
         if not ani or not ani.frames:
             return
-        tex, (tw2, th2) = animated_frame_for(ani, self._tick_i // 3)
+        tex, (tw2, th2) = animated_frame_for(
+            ani, self._tick_i // self.COIN_ANIM_TICK_STRIDE
+        )
         Color(1, 1, 1, 1)
         for tx, ty in self.level.floating_coin_tiles:
             sx = tx * TILE + self.camera_x
@@ -776,6 +804,17 @@ class GameView(Widget):
             y_draw = screen_y_bottom_tile + (TILE - th2) * 0.5
             x_draw = sx + (TILE - tw2) * 0.5
             Rectangle(texture=tex, pos=(x_draw, y_draw), size=(tw2, th2))
+
+    def _redraw_mushrooms(self, h: float) -> None:
+        tup = self.sprite_repo.get_static("mushroom")
+        if not tup:
+            return
+        tex, (tw2, th2) = tup
+        Color(1, 1, 1, 1)
+        for m in self.mushrooms.entities:
+            px = m.rect.x + self.camera_x
+            py = _world_to_kivy_y(h, m.rect.y, th2)
+            Rectangle(texture=tex, pos=(px, py), size=(tw2, th2))
 
     def _draw_hud_strip(self, w: float, h: float) -> None:
         """Top bar + coin/mushroom icons (counts are separate `Label` widgets)."""
@@ -789,7 +828,9 @@ class GameView(Widget):
 
         ani = self.sprite_repo.animated.get("coin")
         if ani and ani.frames:
-            tex, (tw, th) = animated_frame_for(ani, self._tick_i // 3)
+            tex, (tw, th) = animated_frame_for(
+                ani, self._tick_i // self.COIN_ANIM_TICK_STRIDE
+            )
             scale = icon_max / max(float(tw), float(th))
             dw, dh = tw * scale, th * scale
             Color(1, 1, 1, 1)
@@ -924,6 +965,7 @@ class GameView(Widget):
                     self._draw_cell_tile(h, tx, ty, cell)
 
             self._draw_floating_coins(h)
+            self._redraw_mushrooms(h)
             self._redraw_remote_peers(h)
             self._redraw_mario(h)
             self._redraw_fireballs(h)
