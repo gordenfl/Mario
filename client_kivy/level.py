@@ -11,6 +11,11 @@ from .rect import Rect
 
 TILE = 32
 
+# Floating coins / mushroom drops only use world Y in (min, max), exclusive.
+PICKUP_WORLD_Y_MIN = 80.0
+PICKUP_WORLD_Y_MAX = 300.0
+_MUSHROOM_SPAWN_H = 28.0
+
 
 @dataclass
 class CellTile:
@@ -221,6 +226,9 @@ class Level:
                 cell = self.tiles[ty][tx]
                 if cell.solid:
                     continue
+                cy = ty * TILE + TILE * 0.5
+                if not (PICKUP_WORLD_Y_MIN < cy < PICKUP_WORLD_Y_MAX):
+                    continue
                 candidates.append((tx, ty))
         if not candidates:
             return []
@@ -359,6 +367,10 @@ class Level:
             if kind == "RedMushroom":
                 cx = tx * TILE + TILE * 0.5
                 top_y = ty * TILE - 30.0
+                top_y = max(
+                    PICKUP_WORLD_Y_MIN + 0.01,
+                    min(top_y, PICKUP_WORLD_Y_MAX - _MUSHROOM_SPAWN_H - 0.01),
+                )
                 self._pending_mushroom_spawns.append((cx, top_y))
             return True
         cell = self.get_cell(tx, ty)

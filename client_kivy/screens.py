@@ -538,6 +538,12 @@ class GameScreen(Screen):
         lobby.message = "请选择房间加入，或创建房间等待对手。"
         lobby.msg_lbl.text = lobby.message
         if lobby.network:
+            # Leave the match room on the server; otherwise we stay seated and the
+            # room can still appear joinable (e.g. 1 player left after opponent left).
+            try:
+                lobby.network.send_message({"type": "leave_room"})
+            except Exception:
+                pass
             lobby.network.request_room_list()
         self.manager.current = "lobby"
 

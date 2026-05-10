@@ -50,9 +50,17 @@ class Rect:
     def centerx(self) -> float:
         return self.x + self.w * 0.5
 
+    @centerx.setter
+    def centerx(self, v: float) -> None:
+        self.x = v - self.w * 0.5
+
     @property
     def centery(self) -> float:
         return self.y + self.h * 0.5
+
+    @centery.setter
+    def centery(self, v: float) -> None:
+        self.y = v - self.h * 0.5
 
     @property
     def center(self) -> Point:
