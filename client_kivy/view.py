@@ -237,7 +237,7 @@ class GameView(Widget):
 
             self._redraw_mario(h)
             self._redraw_fireballs(h)
-            self.effects.draw(self.canvas, self.camera_x, self.VIRTUAL_H)
+            self.effects.draw(self.camera_x, self.VIRTUAL_H)
 
             if self.controls.joy.active:
                 cx, cy = self.controls.joy.center
