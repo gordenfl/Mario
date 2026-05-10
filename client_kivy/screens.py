@@ -562,9 +562,11 @@ class GameScreen(Screen):
         else:
             self._game_view.configure_offline()
         self._game_view.set_local_username(uname)
+        self._game_view.bind_keyboard()
 
     def on_leave(self):
         if self._game_view is not None:
+            self._game_view.unbind_keyboard()
             self._game_view.configure_offline()
 
 

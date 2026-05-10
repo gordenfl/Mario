@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from kivy.clock import Clock
+from kivy.core.window import Keyboard, Window
 from kivy.graphics import Color, Ellipse, PopMatrix, PushMatrix, Rectangle, Scale, Translate
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
@@ -174,6 +175,13 @@ class GameView(Widget):
 
         self._remote_name_lbls: Dict[str, _PassthroughLabel] = {}
 
+        # Desktop keyboard (Window.bind from GameScreen.on_enter / on_leave).
+        self._keyboard_bound = False
+        self._kb_left = False
+        self._kb_right = False
+        self._kb_jump = False
+        self._kb_fire = False
+
         self.bind(size=self._on_size)
         Clock.schedule_interval(self._tick, self._dt)
 
@@ -201,6 +209,91 @@ class GameView(Widget):
         touch_v.y = vy
         touch_v.uid = touch.uid
         return self.controls.on_touch_up(touch_v) or super().on_touch_up(touch)
+
+    def bind_keyboard(self) -> None:
+        """Attach global key handlers (GameScreen.on_enter — avoids stealing keys from login)."""
+        if self._keyboard_bound:
+            return
+        Window.bind(on_key_down=self._on_window_key_down, on_key_up=self._on_window_key_up)
+        self._keyboard_bound = True
+
+    def unbind_keyboard(self) -> None:
+        """Detach global key handlers (GameScreen.on_leave)."""
+        if not self._keyboard_bound:
+            return
+        Window.unbind(on_key_down=self._on_window_key_down, on_key_up=self._on_window_key_up)
+        self._keyboard_bound = False
+        self._kb_left = False
+        self._kb_right = False
+        self._kb_jump = False
+        self._kb_fire = False
+
+    @staticmethod
+    def _keyboard_action(key: int, codepoint: str) -> Optional[str]:
+        """Map key to control; None = ignore."""
+        if codepoint:
+            if codepoint == " ":
+                return "fire"
+            ch = codepoint.lower()
+            if ch == "a":
+                return "left"
+            if ch == "d":
+                return "right"
+            if ch == "w":
+                return "jump"
+            if ch == "s":
+                return "down"
+            if ch in ("j", "k", "z", "x"):
+                return "fire"
+        try:
+            kc = Keyboard.keycodes
+            if key == kc["left"]:
+                return "left"
+            if key == kc["right"]:
+                return "right"
+            if key == kc["up"]:
+                return "jump"
+            if key == kc["down"]:
+                return "down"
+            for letter, act in (
+                ("a", "left"),
+                ("d", "right"),
+                ("w", "jump"),
+                ("s", "down"),
+                ("j", "fire"),
+                ("k", "fire"),
+                ("z", "fire"),
+                ("x", "fire"),
+            ):
+                lk = kc.get(letter)
+                if lk is not None and key == lk:
+                    return act
+        except KeyError:
+            pass
+        if key == 32:
+            return "fire"
+        return None
+
+    def _set_kb_control(self, action: str, down: bool) -> None:
+        if action == "left":
+            self._kb_left = down
+        elif action == "right":
+            self._kb_right = down
+        elif action == "jump":
+            self._kb_jump = down
+        elif action == "fire":
+            self._kb_fire = down
+
+    def _on_window_key_down(self, window, key: int, scancode: int, codepoint: str, modifiers):
+        act = self._keyboard_action(key, codepoint or "")
+        if act:
+            self._set_kb_control(act, True)
+
+    def _on_window_key_up(self, window, key: int, scancode: int):
+        # SDL2 dispatches on_key_up with (key, scancode) only — no codepoint/modifiers.
+        act = self._keyboard_action(key, "")
+        if act:
+            self._set_kb_control(act, False)
 
     def configure_online(self, network: Any, username: str, room_ready: dict) -> None:
         """Spawn position, remotes, UDP map, enable UDP (matches pygame client flow)."""
@@ -640,7 +733,16 @@ class GameView(Widget):
             self._poll_udp_and_send_if_alive()
 
         joy = self.controls.joy
-        self.mario.apply_controls(move_dir=joy.move_dir, jump=joy.jump, fire=self.controls.fire_pressed)
+        move_dir = joy.move_dir
+        if self._kb_left and not self._kb_right:
+            move_dir = -1.0
+        elif self._kb_right and not self._kb_left:
+            move_dir = 1.0
+        elif self._kb_left and self._kb_right:
+            move_dir = 0.0
+        jump = joy.jump or self._kb_jump
+        fire = self.controls.fire_pressed or self._kb_fire
+        self.mario.apply_controls(move_dir=move_dir, jump=jump, fire=fire)
         self.mario.update()
         self._tick_i += 1
 
