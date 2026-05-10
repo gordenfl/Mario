@@ -55,6 +55,7 @@ class NetworkClient:
         self._udp_enabled = False
         self._udp_state_interval = 1.0 / 60.0
         self._last_udp_state_sent = 0.0
+        self._last_udp_logged_payload: Optional[bytes] = None
 
     def connect(self, username: str) -> Dict:
         """Connect to the server and perform login. Returns login response."""
@@ -88,6 +89,7 @@ class NetworkClient:
             self._udp_client.close()
             self._udp_client = None
         self._udp_enabled = False
+        self._last_udp_logged_payload = None
 
     def list_rooms(self) -> List[Dict]:
         self.send_message({"type": "list_rooms"})
@@ -181,6 +183,7 @@ class NetworkClient:
             self._udp_client.open(token, client_id, host, port)
             self._udp_enabled = True
             self._last_udp_state_sent = 0.0
+            self._last_udp_logged_payload = None
             logging.debug("UDP channel enabled: host=%s port=%s client_id=%s", host, port, client_id)
             return True
         except OSError as exc:
@@ -235,7 +238,9 @@ class NetworkClient:
             int(state.get("heading", 0)),
         )
         ok = self._udp_client.send(MSG_PLAYER_STATE, payload)
-        logging.debug("[udp] send state -> %s payload=%s", ok, state)
+        if payload != self._last_udp_logged_payload:
+            logging.debug("[udp] send state -> %s payload=%s", ok, state)
+            self._last_udp_logged_payload = payload
         if ok:
             self._last_udp_state_sent = now
         return ok

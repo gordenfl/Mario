@@ -115,6 +115,7 @@ class GameView(Widget):
             shorten=False,
             **text_font_kwargs(),
         )
+        self._coord_lbl.opacity = 0.0
         self.add_widget(self._coord_lbl)
 
         self._name_lbl = _PassthroughLabel(
@@ -131,11 +132,11 @@ class GameView(Widget):
 
         self._pos_corner_lbl = _PassthroughLabel(
             text="",
-            font_size="13sp",
+            font_size="14sp",
             color=(0.0, 0.0, 0.0, 1.0),
             size_hint=(None, None),
             halign="left",
-            valign="bottom",
+            valign="middle",
             shorten=False,
             **text_font_kwargs(),
         )
@@ -301,9 +302,10 @@ class GameView(Widget):
         self._layout_name_tags()
         self._layout_corner_position()
         self._layout_hud()
+        self._raise_corner_label_to_front()
 
     def _layout_corner_position(self) -> None:
-        """World (x, y) at bottom-left of the letterboxed game area (not outer black bars)."""
+        """World (x, y) bottom-left of the game view (letterboxed), black text."""
         if self._pos_corner_lbl is None:
             return
         self._compute_view_transform()
@@ -311,11 +313,11 @@ class GameView(Widget):
         self._pos_corner_lbl.text = f"({mr.x:.0f}, {mr.y:.0f})"
         tw, th = self._pos_corner_lbl.texture_size
         self._pos_corner_lbl.size = (max(tw, 1), max(th, 1))
-        # Inside scaled virtual framebuffer so black text sits on sky/tiles, not letterbox #000.
-        pad_v = 10.0
+        pad_x = 12.0
+        pad_y = 12.0
         ox, oy = self._view_offset
         s = self._view_scale or 1.0
-        self._pos_corner_lbl.pos = (ox + pad_v * s, oy + pad_v * s)
+        self._pos_corner_lbl.pos = (ox + pad_x * s, oy + pad_y * s)
 
     def _layout_hud(self) -> None:
         """HP / coin / mushroom counters — virtual top strip, window-mapped like name tags."""
@@ -449,14 +451,12 @@ class GameView(Widget):
         return cx, top
 
     def _layout_name_tags(self) -> None:
-        """Local login name + coords; remote login names — all above character sprites."""
+        """Local login name + remote login names above character sprites."""
         h = float(self.VIRTUAL_H)
         s = self._view_scale or 1.0
         ox, oy = self._view_offset
         gap = 6.0
-        line_gap = 3.0
 
-        mr = self.mario.rect
         cx, top = self._local_mario_sprite_top_virtual(h)
         win_cx = ox + cx * s
         stack_v = top + gap
@@ -468,15 +468,6 @@ class GameView(Widget):
         self._name_lbl.size = (max(nw, 1), max(nh, 1))
         win_y_name = oy + stack_v * s
         self._name_lbl.pos = (win_cx - nw * 0.5, win_y_name)
-
-        self._coord_lbl.text = f"({mr.x:.0f}, {mr.y:.0f})"
-        tw, th = self._coord_lbl.texture_size
-        self._coord_lbl.size = (max(tw, 1), max(th, 1))
-        if display:
-            win_y_coord = win_y_name + nh + line_gap * s
-        else:
-            win_y_coord = oy + stack_v * s
-        self._coord_lbl.pos = (win_cx - tw * 0.5, win_y_coord)
 
         for un, rp in self._remotes.items():
             lbl = self._remote_name_lbls.get(un)
@@ -986,3 +977,5 @@ class GameView(Widget):
         self._layout_name_tags()
         self._layout_corner_position()
         self._layout_hud()
+        self._raise_corner_label_to_front()
+        self._raise_corner_label_to_front()

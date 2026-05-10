@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 from .rect import Rect
 from .level import TILE, Level
+
+_CLIENT_DIR = Path(__file__).resolve().parents[1] / "client"
+if str(_CLIENT_DIR) not in sys.path:
+    sys.path.insert(0, str(_CLIENT_DIR))
+from jump_constants import JUMP_HEIGHT, JUMP_VERTICAL_SPEED  # noqa: E402
 
 
 @dataclass
@@ -26,9 +33,9 @@ class Mario:
         self.obey_gravity = True
         self.in_jump = False
         self.jump_start_y = 0.0
-        # Match legacy client JumpTrait tuning
-        self.jump_vertical_speed = -12.0
-        self.jump_height = 120.0
+        # Same tuning as pygame `traits.jump` via `client/jump_constants.py`
+        self.jump_vertical_speed = float(JUMP_VERTICAL_SPEED)
+        self.jump_height = float(JUMP_HEIGHT)
         # deaccelerationHeight = jumpHeight - v^2/(2g)
         self.jump_deaccel_height = self.jump_height - (
             (self.jump_vertical_speed * self.jump_vertical_speed) / (2.0 * self.gravity)

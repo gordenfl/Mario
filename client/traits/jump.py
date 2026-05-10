@@ -1,7 +1,10 @@
+from jump_constants import JUMP_HEIGHT, JUMP_VERTICAL_SPEED
+
+
 class JumpTrait:
     def __init__(self, entity):
-        self.verticalSpeed = -12
-        self.jumpHeight = 120
+        self.verticalSpeed = JUMP_VERTICAL_SPEED
+        self.jumpHeight = JUMP_HEIGHT
         self.entity = entity
         self.initalHeight = 384
         self.deaccelerationHeight = self.jumpHeight - ((self.verticalSpeed*self.verticalSpeed)/(2*self.entity.gravity))

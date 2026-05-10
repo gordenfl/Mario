@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import random
+import string
 import threading
 from functools import partial
 from typing import Any, Dict, List, Optional
@@ -42,6 +43,11 @@ SERVER_PORT = int(os.environ.get("MARIO_SERVER_PORT", "8765"))
 REFRESH_INTERVAL_MS = 5000
 
 
+def _random_username() -> str:
+    """10 random English letters (upper + lower)."""
+    return "".join(random.choices(string.ascii_letters, k=10))
+
+
 class LoginScreen(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -69,7 +75,8 @@ class LoginScreen(Screen):
             **text_font_kwargs(),
         )
         self.username_input = TextInput(
-            hint_text="用户名（可留空自动生成）",
+            text=_random_username(),
+            hint_text="用户名（可留空则随机生成）",
             multiline=False,
             size_hint_y=None,
             height=dp(44),
@@ -106,7 +113,7 @@ class LoginScreen(Screen):
             return
         name = (self.username_input.text or "").strip()
         if not name:
-            name = f"player-{random.randint(1000, 9999)}"
+            name = _random_username()
 
         self._busy = True
         self.btn_enter.disabled = True
