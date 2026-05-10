@@ -207,7 +207,7 @@ class Level:
         else:
             self._solid.discard((tx, ty))
 
-    def break_tile(self, tx: int, ty: int) -> bool:
+    def break_tile(self, tx: int, ty: int, *, record_break: bool = True) -> bool:
         cell = self.get_cell(tx, ty)
         if not cell:
             return False
@@ -215,7 +215,8 @@ class Level:
             return False
         # Replace with sky (non-solid).
         self.set_cell(tx, ty, CellTile(sprite_key="sky", solid=False, redraw_sky_below=False))
-        self._broken_tiles.append((tx, ty))
+        if record_break:
+            self._broken_tiles.append((tx, ty))
         return True
 
     def consume_broken_tiles(self) -> List[Tuple[int, int]]:

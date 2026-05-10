@@ -43,7 +43,12 @@ class Mario:
         self.fire_requested = False
         self.fire_cooldown = 0
 
+        self.hp = 30
+        self.dead = False
+
     def apply_controls(self, *, move_dir: float, jump: bool, fire: bool) -> None:
+        if self.dead:
+            return
         self.move_dir = max(-1.0, min(1.0, float(move_dir)))
         self.jump_requested = bool(jump)
         self.jump_held = bool(jump)
@@ -52,6 +57,8 @@ class Mario:
             self.heading = 1 if self.move_dir > 0 else -1
 
     def update(self) -> None:
+        if self.dead:
+            return
         # Horizontal acceleration / friction
         max_v = 3.2
         accel = 0.45

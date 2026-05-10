@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from kivy.app import App
 from kivy.core.window import Window
-from kivy.uix.boxlayout import BoxLayout
 
-from .view import GameView
+from .font_config import register_ui_font
 
 
 class MarioFightKivyApp(App):
     def build(self):
+        # Chinese UI: register client/fonts/Regular.ttf before any widgets.
+        register_ui_font()
+
+        from .screens import build_screen_manager
+
         # Prefer landscape; iOS orientation will be set in Xcode/plist later.
         try:
             # On desktop, allow resizing. The game renders to a fixed virtual
@@ -18,9 +22,7 @@ class MarioFightKivyApp(App):
         except Exception:
             pass
 
-        root = BoxLayout()
-        root.add_widget(GameView())
-        return root
+        return build_screen_manager()
 
 
 if __name__ == "__main__":
