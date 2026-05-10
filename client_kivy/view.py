@@ -60,6 +60,13 @@ class GameView(Widget):
     DEATH_FALL_SPEED = 280.0  # world px/sec downward
     DEATH_FALL_STOP_Y = 720.0  # world y below visible — slide off screen
 
+    HUD_BAR_H = 34.0
+    HUD_PAD_X = 12.0
+    HUD_COIN_ICON_X = 118.0
+    HUD_MUSH_ICON_X = 248.0
+    HUD_COIN_TEXT_X = 146.0
+    HUD_MUSH_TEXT_X = 276.0
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.controls = TouchControls()
@@ -288,6 +295,7 @@ class GameView(Widget):
         self._refit_overlay_text()
         self._layout_name_tags()
         self._layout_corner_position()
+        self._layout_hud()
 
     def _layout_corner_position(self) -> None:
         """World (x, y) at bottom-left of the letterboxed game area (not outer black bars)."""
@@ -303,6 +311,32 @@ class GameView(Widget):
         ox, oy = self._view_offset
         s = self._view_scale or 1.0
         self._pos_corner_lbl.pos = (ox + pad_v * s, oy + pad_v * s)
+
+    def _layout_hud(self) -> None:
+        """HP / coin / mushroom counters — virtual top strip, window-mapped like name tags."""
+        self._compute_view_transform()
+        h = float(self.VIRTUAL_H)
+        s = self._view_scale or 1.0
+        ox, oy = self._view_offset
+        bar_h = self.HUD_BAR_H
+
+        self._hud_hp_lbl.text = f"HP {self.mario.hp}"
+        self._hud_coin_lbl.text = str(self.mario.coins)
+        self._hud_mush_lbl.text = str(self.mario.mushrooms_eaten)
+
+        for lbl in (self._hud_hp_lbl, self._hud_coin_lbl, self._hud_mush_lbl):
+            tw, th = lbl.texture_size
+            lbl.size = (max(tw, 1), max(th, 1))
+
+        nh = max(self._hud_hp_lbl.texture_size[1], 1)
+        row_bottom_v = h - bar_h + max(0.0, (bar_h - nh) * 0.5)
+
+        pad_x = self.HUD_PAD_X
+        self._hud_hp_lbl.pos = (ox + pad_x * s, oy + row_bottom_v * s)
+
+        self._hud_coin_lbl.pos = (ox + self.HUD_COIN_TEXT_X * s, oy + row_bottom_v * s)
+
+        self._hud_mush_lbl.pos = (ox + self.HUD_MUSH_TEXT_X * s, oy + row_bottom_v * s)
 
     def _local_mario_sprite_top_virtual(self, h: float) -> tuple[float, float]:
         """Sprite top for HUD; uses death sprite while dead."""
@@ -614,6 +648,10 @@ class GameView(Widget):
         self.mario.update()
         self._tick_i += 1
 
+        n_coins = self.level.collect_coin_pickups(self.mario.rect)
+        if n_coins:
+            self.mario.coins += n_coins
+
         # Same rounding as client/network/protocol.pack_player_state so logs match gameplay.
         if int(round(self.mario.rect.y)) >= int(self.FALL_DEATH_Y):
             self._trigger_local_death(reason="fall")
@@ -724,6 +762,61 @@ class GameView(Widget):
             y_draw = screen_y_bottom_tile + (TILE - th2)
             Rectangle(texture=tex, pos=(sx + (TILE - tw2) / 2, y_draw), size=(tw2, th2))
 
+    def _draw_floating_coins(self, h: float) -> None:
+        """Animated coin pickups from `level.floating_coin_tiles` (world space)."""
+        ani = self.sprite_repo.animated.get("coin")
+        if not ani or not ani.frames:
+            return
+        tex, (tw2, th2) = animated_frame_for(ani, self._tick_i // 3)
+        Color(1, 1, 1, 1)
+        for tx, ty in self.level.floating_coin_tiles:
+            sx = tx * TILE + self.camera_x
+            y_top = ty * TILE
+            screen_y_bottom_tile = _world_to_kivy_y(h, y_top, TILE)
+            y_draw = screen_y_bottom_tile + (TILE - th2) * 0.5
+            x_draw = sx + (TILE - tw2) * 0.5
+            Rectangle(texture=tex, pos=(x_draw, y_draw), size=(tw2, th2))
+
+    def _draw_hud_strip(self, w: float, h: float) -> None:
+        """Top bar + coin/mushroom icons (counts are separate `Label` widgets)."""
+        bar_h = self.HUD_BAR_H
+        Color(0.0, 0.0, 0.0, 0.48)
+        Rectangle(pos=(0.0, h - bar_h), size=(w, bar_h))
+
+        slot = 22.0
+        icon_max = 20.0
+        y_slot_bottom = h - bar_h + (bar_h - slot) * 0.5
+
+        ani = self.sprite_repo.animated.get("coin")
+        if ani and ani.frames:
+            tex, (tw, th) = animated_frame_for(ani, self._tick_i // 3)
+            scale = icon_max / max(float(tw), float(th))
+            dw, dh = tw * scale, th * scale
+            Color(1, 1, 1, 1)
+            Rectangle(
+                texture=tex,
+                pos=(
+                    self.HUD_COIN_ICON_X + (slot - dw) * 0.5,
+                    y_slot_bottom + (slot - dh) * 0.5,
+                ),
+                size=(dw, dh),
+            )
+
+        mush = self.sprite_repo.get_static("mushroom")
+        if mush:
+            tex, (tw, th) = mush
+            scale = icon_max / max(float(tw), float(th))
+            dw, dh = tw * scale, th * scale
+            Color(1, 1, 1, 1)
+            Rectangle(
+                texture=tex,
+                pos=(
+                    self.HUD_MUSH_ICON_X + (slot - dw) * 0.5,
+                    y_slot_bottom + (slot - dh) * 0.5,
+                ),
+                size=(dw, dh),
+            )
+
     def _redraw_mario(self, h: float):
         mr = self.mario.rect
         if self.mario.dead:
@@ -830,6 +923,7 @@ class GameView(Widget):
                     cell = self.level.tiles[ty][tx]
                     self._draw_cell_tile(h, tx, ty, cell)
 
+            self._draw_floating_coins(h)
             self._redraw_remote_peers(h)
             self._redraw_mario(h)
             self._redraw_fireballs(h)
@@ -843,7 +937,10 @@ class GameView(Widget):
                 Color(1.0, 1.0, 1.0, 0.18)
                 Ellipse(pos=(kx - 28, ky - 28), size=(56, 56))
 
+            self._draw_hud_strip(w, h)
+
             PopMatrix()
 
         self._layout_name_tags()
         self._layout_corner_position()
+        self._layout_hud()

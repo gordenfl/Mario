@@ -488,6 +488,15 @@ class GameServer:
         ]
         await self.send(client, {"type": "rooms", "rooms": rooms_payload})
 
+    async def broadcast_rooms_to_lobby(self) -> None:
+        """Notify lobby browsers when joinable room set changes (e.g. room fills / starts)."""
+        async with self.lock:
+            recipients = [
+                c for c in self.clients.values() if c.username and c.room_id is None
+            ]
+        for client in recipients:
+            await self.send_rooms_snapshot(client)
+
     async def handle_create_room(self, client: ClientSession):
         async with self.lock:
             room_id = uuid.uuid4().hex[:6]
@@ -583,10 +592,17 @@ class GameServer:
             task = self.room_snapshot_tasks.pop(room.room_id)
             task.cancel()
         self.room_snapshot_tasks[room.room_id] = asyncio.create_task(self._room_snapshot_loop(room.room_id))
+        await self.broadcast_rooms_to_lobby()
 
     async def handle_leave_room(self, client: ClientSession):
         if not client.room_id:
             return
+        try:
+            await self._handle_leave_room_body(client)
+        finally:
+            await self.broadcast_rooms_to_lobby()
+
+    async def _handle_leave_room_body(self, client: ClientSession) -> None:
         async with self.lock:
             room = self.rooms.get(client.room_id)
             if room:

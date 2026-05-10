@@ -97,6 +97,7 @@ class Mario:
         # Integrate + collide Y then X (top-left coordinate system)
         self._move_y(self.vel.y)
         self._move_x(self.vel.x)
+        self._clamp_to_level_horizontal()
 
         if self.fire_cooldown > 0:
             self.fire_cooldown -= 1
@@ -138,6 +139,16 @@ class Mario:
                     self.rect.left = tile.right
                 self.vel.x = 0.0
                 break
+
+    def _clamp_to_level_horizontal(self) -> None:
+        """Keep Mario inside the level width (same span as camera scroll)."""
+        width_px = max(1, self.level.length_tiles) * TILE
+        if self.rect.left < 0.0:
+            self.rect.left = 0.0
+            self.vel.x = 0.0
+        elif self.rect.right > width_px:
+            self.rect.right = float(width_px)
+            self.vel.x = 0.0
 
     def _move_y(self, dy: float) -> None:
         self.on_ground = False
