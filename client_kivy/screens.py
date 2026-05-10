@@ -37,7 +37,7 @@ def _import_network():
 
 NetworkClient, NetworkError = _import_network()
 
-SERVER_HOST = os.environ.get("MARIO_SERVER_HOST", "127.0.0.1")
+SERVER_HOST = os.environ.get("MARIO_SERVER_HOST", "192.168.1.75")
 SERVER_PORT = int(os.environ.get("MARIO_SERVER_PORT", "8765"))
 
 REFRESH_INTERVAL_MS = 5000

@@ -38,7 +38,7 @@ class NetworkClient:
     JSON messages when complete lines are available.
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8765, timeout: float = 10.0):
+    def __init__(self, host: str = "192.168.1.75", port: int = 8765, timeout: float = 10.0):
         self.host = host
         self.port = port
         self.timeout = timeout
