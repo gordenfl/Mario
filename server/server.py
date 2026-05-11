@@ -30,6 +30,10 @@ def _load_level_length(default_tiles: int = 60) -> int:
 LEVEL_TILE_LENGTH = _load_level_length()
 LEVEL_WIDTH_PIXELS = LEVEL_TILE_LENGTH * 32
 
+# Room lifecycle: only WAITING rooms appear in list_rooms; FIGHTING is in-match; room dict entry removed after match.
+ROOM_PHASE_WAITING = "waiting"
+ROOM_PHASE_FIGHTING = "fighting"
+
 
 @dataclass
 class ClientSession:
@@ -52,9 +56,11 @@ class ClientSession:
 @dataclass
 class Room:
     room_id: str
+    phase: str = ROOM_PHASE_WAITING
     members: Dict[str, ClientSession] = field(default_factory=dict)
     active_drops: Dict[str, Dict] = field(default_factory=dict)
     broken_tiles: set = field(default_factory=set)
+    collected_floating_coins: set = field(default_factory=set)
     game_over: bool = False
     result: Optional[Dict[str, str]] = None
     udp_clients: Dict[str, "UdpClientInfo"] = field(default_factory=dict)
@@ -193,6 +199,8 @@ class GameServer:
             await self.handle_drop_collision(client, message)
         elif msg_type == "tile_break":
             await self.handle_tile_break(client, message)
+        elif msg_type == "floating_coin_collected":
+            await self.handle_floating_coin_collected(client, message)
         else:
             await self.send_error(client, "unknown_type", f"Unknown message type: {msg_type}")
 
@@ -482,9 +490,10 @@ class GameServer:
                 "room_id": room_id,
                 "players": [member.username for member in room.members.values()],
                 "is_full": room.is_full(),
+                "phase": room.phase,
             }
             for room_id, room in self.rooms.items()
-            if not room.is_full()
+            if room.phase == ROOM_PHASE_WAITING and not room.is_full()
         ]
         await self.send(client, {"type": "rooms", "rooms": rooms_payload})
 
@@ -496,6 +505,37 @@ class GameServer:
             ]
         for client in recipients:
             await self.send_rooms_snapshot(client)
+
+    async def _purge_room(self, room: Room, *, broadcast_lobby: bool) -> None:
+        """Remove room from registry, detach members, cancel tasks (match ended or room emptied)."""
+        rid = room.room_id
+        async with self.lock:
+            if rid not in self.rooms:
+                return
+            self.rooms.pop(rid, None)
+            task = self.room_drop_tasks.pop(rid, None)
+            if task:
+                task.cancel()
+            snapshot_task = self.room_snapshot_tasks.pop(rid, None)
+            if snapshot_task:
+                snapshot_task.cancel()
+            room.active_drops.clear()
+            room.projectiles.clear()
+            for info in list(room.udp_clients.values()):
+                self.pending_udp_tokens.pop(info.token, None)
+                if info.address:
+                    self.udp_addr_map.pop(info.address, None)
+                self.udp_index_map.pop((rid, info.client_index), None)
+            room.udp_clients.clear()
+            room.latest_states.clear()
+            room.udp_client_index_map.clear()
+            for m in list(room.members.values()):
+                m.room_id = None
+                m.udp_id = None
+            room.members.clear()
+        logging.info("Room %s purged from registry", rid)
+        if broadcast_lobby:
+            await self.broadcast_rooms_to_lobby()
 
     async def handle_create_room(self, client: ClientSession):
         async with self.lock:
@@ -516,21 +556,28 @@ class GameServer:
         if not room_id:
             await self.send_error(client, "invalid_room", "Room id required")
             return
+        reject: Optional[Tuple[str, str]] = None
         async with self.lock:
             room = self.rooms.get(room_id)
             if not room:
-                await self.send_error(client, "invalid_room", "Room does not exist")
-                return
-            if room.is_full():
-                await self.send_error(client, "room_full", "Room is full")
-                return
-            room.add_member(client)
+                reject = ("invalid_room", "Room does not exist")
+            elif room.phase != ROOM_PHASE_WAITING:
+                reject = ("invalid_room", "Room is not open for joining")
+            elif room.is_full():
+                reject = ("room_full", "Room is full")
+            else:
+                room.add_member(client)
+        if reject:
+            code, errmsg = reject
+            await self.send_error(client, code, errmsg)
+            return
         logging.info("%s joined room %s", client.username, room_id)
         await self.send(client, {"type": "room_joined", "room_id": room_id})
         await self.notify_room_ready(room)
 
     async def notify_room_ready(self, room: Room):
         if not room.is_full():
+            room.phase = ROOM_PHASE_WAITING
             for member in room.members.values():
                 await self.send(member, {
                     "type": "room_waiting",
@@ -548,6 +595,7 @@ class GameServer:
         room.latest_states.clear()
         room.projectiles.clear()
         room.broken_tiles.clear()
+        room.collected_floating_coins.clear()
         room.game_over = False
         room.result = None
         for member in room.members.values():
@@ -588,6 +636,7 @@ class GameServer:
                     "host": udp_host,
                 },
             })
+        room.phase = ROOM_PHASE_FIGHTING
         if room.room_id in self.room_snapshot_tasks:
             task = self.room_snapshot_tasks.pop(room.room_id)
             task.cancel()
@@ -644,23 +693,7 @@ class GameServer:
             if winner_name:
                 await self._broadcast_game_over(room, winner_name, client.username)
         if room and should_delete:
-            async with self.lock:
-                self.rooms.pop(room.room_id, None)
-                task = self.room_drop_tasks.pop(room.room_id, None)
-                if task:
-                    task.cancel()
-                snapshot_task = self.room_snapshot_tasks.pop(room.room_id, None)
-                if snapshot_task:
-                    snapshot_task.cancel()
-                for info in room.udp_clients.values():
-                    self.pending_udp_tokens.pop(info.token, None)
-                    if info.address:
-                        self.udp_addr_map.pop(info.address, None)
-                    self.udp_index_map.pop((room.room_id, info.client_index), None)
-                room.udp_clients.clear()
-                room.latest_states.clear()
-                room.udp_client_index_map.clear()
-                room.projectiles.clear()
+            await self._purge_room(room, broadcast_lobby=False)
         logging.info("%s left room %s", client.username, room.room_id if room else "<unknown>")
 
     async def handle_state_update(self, client: ClientSession, message: Dict):
@@ -846,6 +879,41 @@ class GameServer:
         for member in recipients:
             await self.send(member, payload)
 
+    async def handle_floating_coin_collected(self, client: ClientSession, message: Dict):
+        """Broadcast floating coin pickup so all clients remove the same tile."""
+        if not client.room_id:
+            return
+        tx = message.get("x")
+        ty = message.get("y")
+        if not isinstance(tx, int) or not isinstance(ty, int):
+            return
+        async with self.lock:
+            room = self.rooms.get(client.room_id)
+            if not room:
+                return
+            if room.game_over:
+                return
+            key = (tx, ty)
+            if key in room.collected_floating_coins:
+                return
+            room.collected_floating_coins.add(key)
+            recipients = list(room.members.values())
+        payload = {
+            "type": "floating_coin_collected",
+            "x": tx,
+            "y": ty,
+            "username": client.username,
+        }
+        logging.info(
+            "[room %s] floating_coin_collected at (%d, %d) by %s",
+            client.room_id,
+            tx,
+            ty,
+            client.username,
+        )
+        for member in recipients:
+            await self.send(member, payload)
+
     async def _room_drop_loop(self, room_id: str):
         try:
             while True:
@@ -949,6 +1017,7 @@ class GameServer:
         }
         for member in list(room.members.values()):
             await self.send(member, payload)
+        await self._purge_room(room, broadcast_lobby=True)
 
     async def forward_to_room(self, client: ClientSession, message: Dict):
         if not client.room_id:

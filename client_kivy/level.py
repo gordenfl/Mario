@@ -294,20 +294,25 @@ class Level:
         self._pending_mushroom_spawns.clear()
         return out
 
-    def collect_coin_pickups(self, rect: Rect) -> int:
-        """Remove floating coins overlapping Mario; return count collected."""
+    def collect_coin_pickups(self, rect: Rect) -> List[Tuple[int, int]]:
+        """Remove floating coins overlapping Mario; return collected tile coords (tx, ty)."""
         if not self.floating_coin_tiles:
-            return 0
+            return []
         remain: List[Tuple[int, int]] = []
-        taken = 0
+        collected: List[Tuple[int, int]] = []
         for tx, ty in self.floating_coin_tiles:
             tr = self.tile_rect(tx, ty)
             if rect.colliderect(tr):
-                taken += 1
+                collected.append((tx, ty))
             else:
                 remain.append((tx, ty))
         self.floating_coin_tiles = remain
-        return taken
+        return collected
+
+    def remove_floating_coin_tile(self, tx: int, ty: int) -> None:
+        """Remove one floating coin at (tx, ty) if present (remote player collected)."""
+        key = (int(tx), int(ty))
+        self.floating_coin_tiles = [p for p in self.floating_coin_tiles if p != key]
 
     def _index_solids(self) -> None:
         self._solid.clear()

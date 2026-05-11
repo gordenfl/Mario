@@ -1,0 +1,8 @@
+<!--
+  App Store：若收到 ITMS-90683（Missing NSCameraUsageDescription），把下面 dict 里的两个 key
+  合并进 Xcode 里应用的 Info.plist（与现有 <dict> 内容并列，不要删掉原有键）。
+
+  说明见仓库根目录 BuildIOSWITHPYTHON.md §6。
+-->
+	<key>NSCameraUsageDescription</key>
+	<string>Mario Fight does not use your camera for gameplay. This key is required because bundled third-party frameworks may reference camera-related system APIs.</string>

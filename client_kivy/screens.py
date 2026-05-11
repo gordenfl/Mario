@@ -291,6 +291,10 @@ class LobbyScreen(Screen):
     def on_enter(self):
         if self._poll_ev is None:
             self._poll_ev = Clock.schedule_interval(self._poll_network, 1.0 / 60.0)
+        # Always refetch list data when the lobby is shown (matches server waiting-only snapshot).
+        if self.network:
+            self.network.request_room_list()
+            self._refresh_ms = 0.0
 
     def on_leave(self):
         if self._poll_ev is not None:

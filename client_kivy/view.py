@@ -60,8 +60,9 @@ class GameView(Widget):
     CLIENT_ROOT = Path(__file__).resolve().parents[1] / "client"
     VIRTUAL_W = 852.0
     VIRTUAL_H = 480.0
-    # Fall-off death when rounded world Y reaches this (matches UDP `int(round(y))`).
-    FALL_DEATH_Y = 400.0
+    # Pit / fall-off death: match pygame `client/main.py` (`fall_threshold`, rect.bottom).
+    # Do not compare rect.y (sprite top) — that mis-detects vertical position vs “fell through bottom”.
+    FALL_DEATH_BOTTOM_PX = 440.0
     DEATH_POSE_SECONDS = 1.0
     DEATH_FALL_SPEED = 280.0  # world px/sec downward
     DEATH_FALL_STOP_Y = 720.0  # world y below visible — slide off screen
@@ -652,6 +653,10 @@ class GameView(Widget):
                 if isinstance(cid, int):
                     self._udp_username_map[cid] = un
                 rp.apply_snapshot_player(player)
+        elif t == "floating_coin_collected":
+            tx, ty = message.get("x"), message.get("y")
+            if isinstance(tx, int) and isinstance(ty, int):
+                self.level.remove_floating_coin_tile(tx, ty)
         elif t == "tile_break":
             tx, ty = message.get("x"), message.get("y")
             if isinstance(tx, int) and isinstance(ty, int):
@@ -713,9 +718,12 @@ class GameView(Widget):
         self.mario.update()
         self._tick_i += 1
 
-        n_coins = self.level.collect_coin_pickups(self.mario.rect)
-        if n_coins:
-            self.mario.coins += n_coins
+        picked_tiles = self.level.collect_coin_pickups(self.mario.rect)
+        if picked_tiles:
+            self.mario.coins += len(picked_tiles)
+            if self._online and self._net:
+                for tx, ty in picked_tiles:
+                    self._net.send_floating_coin_collected(tx, ty)
 
         for cx, top_y in self.level.pop_mushroom_spawns():
             self.mushrooms.spawn(cx, top_y)
@@ -723,8 +731,8 @@ class GameView(Widget):
         if n_mush:
             self.mario.mushrooms_eaten += n_mush
 
-        # Same rounding as client/network/protocol.pack_player_state so logs match gameplay.
-        if int(round(self.mario.rect.y)) >= int(self.FALL_DEATH_Y):
+        # UDP still sends `rect.y` (top); pit death must use bottom edge like pygame.
+        if int(round(self.mario.rect.bottom)) > int(self.FALL_DEATH_BOTTOM_PX):
             self._trigger_local_death(reason="fall")
         elif self.mario.hp <= 0:
             self._trigger_local_death(reason="hp")

@@ -165,6 +165,14 @@ class NetworkClient:
         }
         self.send_message(payload)
 
+    def send_floating_coin_collected(self, x: int, y: int):
+        payload = {
+            "type": "floating_coin_collected",
+            "x": int(x),
+            "y": int(y),
+        }
+        self.send_message(payload)
+
     # -- UDP support -----------------------------------------------------
 
     def enable_udp(self, token: str, client_id: int, port: Optional[int] = None, host: Optional[str] = None) -> bool:
