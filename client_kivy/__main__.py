@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from ._graphics_config import apply_kivy_graphics_config
+
+apply_kivy_graphics_config()
+
 from kivy.app import App
 from kivy.core.window import Window
 
