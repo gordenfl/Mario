@@ -16,7 +16,7 @@ from .font_config import get_ui_font_name, text_font_kwargs
 from .input import TouchControls
 from .level import TILE, Level
 from .mario import Mario
-from .mushrooms import MushroomSystem
+from .sky_drops import DropSystem
 from .multiplayer import (
     build_remote_peers,
     build_udp_username_map,
@@ -60,6 +60,10 @@ class GameView(Widget):
     CLIENT_ROOT = Path(__file__).resolve().parents[1] / "client"
     VIRTUAL_W = 852.0
     VIRTUAL_H = 480.0
+    # Pygame client uses clock.tick(60); physics must advance at 60 Hz even when
+    # the device renders at 30/120 Hz (otherwise Mario, drops, mushrooms feel slow).
+    PHYSICS_DT = 1.0 / 60.0
+    MAX_PHYSICS_STEPS = 8
     VIRTUAL_MIN_ASPECT = VIRTUAL_W / VIRTUAL_H
     # Pit / fall-off death: match pygame `client/main.py` (`fall_threshold`, rect.bottom).
     # Do not compare rect.y (sprite top) — that mis-detects vertical position vs “fell through bottom”.
@@ -93,9 +97,9 @@ class GameView(Widget):
         self.mario = Mario(2, 10, self.level)
         self.projectiles = ProjectileSystem()
         self.effects = BrickDebrisSystem()
-        self.mushrooms = MushroomSystem()
+        self.drops = DropSystem()
         self.camera_x = 0.0
-        self._dt = 1.0 / 60.0
+        self._physics_accum = 0.0
         self._tick_i = 0
         self._virtual_w = float(self.VIRTUAL_W)
         self._view_scale = 1.0
@@ -167,7 +171,8 @@ class GameView(Widget):
         self._kb_fire = False
 
         self.bind(size=self._on_size)
-        Clock.schedule_interval(self._tick, self._dt)
+        # interval=0: callback every frame; real dt is fed into a 60 Hz fixed timestep.
+        Clock.schedule_interval(self._tick, 0)
 
     def on_touch_down(self, touch):
         vx, vy = self._to_virtual(touch.x, touch.y)
@@ -310,12 +315,14 @@ class GameView(Widget):
             )
         self._online = True
         self._last_tcp_sync = time.monotonic()
+        self.drops.set_collision_callback(self._send_drop_collision)
         self._reset_round_state()
         self._ensure_remote_name_labels()
 
     def configure_offline(self) -> None:
         self._online = False
         self._net = None
+        self.drops.set_collision_callback(None)
         self._remotes.clear()
         self._udp_username_map.clear()
         self._local_udp_id = None
@@ -363,9 +370,9 @@ class GameView(Widget):
         self.mario.hp = 30
         self.mario.coins = 0
         self.mario.mushrooms_eaten = 0
-        self.mushrooms.clear()
+        self.drops.clear()
         self.projectiles.clear()
-        self.level.reset_pickups()
+        self._physics_accum = 0.0
         self._fall_reported = False
         self._game_over_payload = None
         self._death_phase = None
@@ -589,6 +596,10 @@ class GameView(Widget):
             self._net.send_message({"type": "player_fall", "loser": self._username})
         self._begin_local_death_sequence()
 
+    def _send_drop_collision(self, drop_id: str, side: str) -> None:
+        if self._net:
+            self._net.send_drop_collision(drop_id, side)
+
     def _poll_tcp_messages(self) -> None:
         if not self._net:
             return
@@ -659,10 +670,17 @@ class GameView(Widget):
                 if isinstance(cid, int):
                     self._udp_username_map[cid] = un
                 rp.apply_snapshot_player(player)
-        elif t == "floating_coin_collected":
-            tx, ty = message.get("x"), message.get("y")
-            if isinstance(tx, int) and isinstance(ty, int):
-                self.level.remove_floating_coin_tile(tx, ty)
+        elif t == "spawn_drop":
+            self.drops.spawn_from_event(message, self.level)
+        elif t == "drop_collected":
+            drop_id = message.get("drop_id")
+            if drop_id:
+                self.drops.on_remote_collected(str(drop_id))
+        elif t == "drop_direction":
+            drop_id = message.get("drop_id")
+            direction = message.get("direction")
+            if drop_id is not None:
+                self.drops.set_direction(str(drop_id), direction)
         elif t == "tile_break":
             tx, ty = message.get("x"), message.get("y")
             if isinstance(tx, int) and isinstance(ty, int):
@@ -691,7 +709,7 @@ class GameView(Widget):
                 if self._death_phase is None and not self._match_end_fired:
                     self._begin_local_death_sequence()
 
-    def _tick(self, _dt):
+    def _tick(self, dt: float) -> None:
         if self._online and self._net:
             self._poll_tcp_messages()
 
@@ -700,7 +718,7 @@ class GameView(Widget):
             return
 
         if self._death_phase is not None:
-            self._update_death_animation(_dt)
+            self._update_death_animation(dt)
             self._tick_i += 1
             if self._frozen_camera_x is not None:
                 self.camera_x = self._frozen_camera_x
@@ -721,30 +739,51 @@ class GameView(Widget):
         jump = joy.jump or self._kb_jump
         fire = self.controls.fire_pressed or self._kb_fire
         self.mario.apply_controls(move_dir=move_dir, jump=jump, fire=fire)
+
+        frame_dt = max(0.0, min(float(dt or self.PHYSICS_DT), 0.25))
+        self._physics_accum = min(self._physics_accum + frame_dt, self.PHYSICS_DT * self.MAX_PHYSICS_STEPS)
+        steps = 0
+        while self._physics_accum >= self.PHYSICS_DT and steps < self.MAX_PHYSICS_STEPS:
+            self._physics_accum -= self.PHYSICS_DT
+            steps += 1
+            self._physics_step()
+
+        if self._death_phase is not None:
+            self._redraw()
+            return
+
+        if self._online and self._net:
+            self._flush_udp_outbound()
+
+        target = -self.mario.rect.centerx + self._virtual_w * 0.5
+        max_scroll = max(self.level.length_tiles * TILE - self._virtual_w, 0.0)
+        self.camera_x = max(-max_scroll, min(0.0, target))
+
+        self._redraw()
+
+    def _physics_step(self) -> None:
+        """One simulation tick at 60 Hz (matches pygame `clock.tick(60)`)."""
         self.mario.update()
         self._tick_i += 1
 
-        picked_tiles = self.level.collect_coin_pickups(self.mario.rect)
-        if picked_tiles:
-            self.mario.coins += len(picked_tiles)
-            if self._online and self._net:
-                for tx, ty in picked_tiles:
-                    self._net.send_floating_coin_collected(tx, ty)
-
-        for cx, top_y in self.level.pop_mushroom_spawns():
-            self.mushrooms.spawn(cx, top_y)
-        n_mush = self.mushrooms.update(self.level, self.mario.rect)
+        n_coins, n_mush = self.drops.step(
+            self.level,
+            self.mario.rect,
+            self._tick_i,
+            net=self._net if self._online else None,
+        )
+        if n_coins:
+            self.mario.coins += n_coins
+            self.mario.hp = min(self.MARIO_MAX_HP, self.mario.hp + n_coins)
         if n_mush:
             self.mario.mushrooms_eaten += n_mush
+            self.mario.hp = min(self.MARIO_MAX_HP, self.mario.hp + 5 * n_mush)
 
-        # UDP still sends `rect.y` (top); pit death must use bottom edge like pygame.
         if int(round(self.mario.rect.bottom)) > int(self.FALL_DEATH_BOTTOM_PX):
             self._trigger_local_death(reason="fall")
         elif self.mario.hp <= 0:
             self._trigger_local_death(reason="hp")
-
         if self._death_phase is not None:
-            self._redraw()
             return
 
         if self.mario.consume_fire():
@@ -786,7 +825,6 @@ class GameView(Widget):
 
         self.effects.update()
 
-        # Brick break events -> debris (local only; remotes use TCP + record_break=False)
         broken = self.level.consume_broken_tiles()
         if broken:
             bricks = self.sprite_repo.static.get("bricks")
@@ -797,16 +835,6 @@ class GameView(Widget):
             if self._online and self._net:
                 for tx, ty in broken:
                     self._net.send_tile_break(tx, ty)
-
-        if self._online and self._net:
-            self._flush_udp_outbound()
-
-        # Camera is computed in *virtual* pixels, independent of window scaling.
-        target = -self.mario.rect.centerx + self._virtual_w * 0.5
-        max_scroll = max(self.level.length_tiles * TILE - self._virtual_w, 0.0)
-        self.camera_x = max(-max_scroll, min(0.0, target))
-
-        self._redraw()
 
     def _compute_view_transform(self):
         w = float(self.width)
@@ -906,32 +934,31 @@ class GameView(Widget):
             y_draw = screen_y_bottom_tile + (TILE - th2)
             Rectangle(texture=tex, pos=(sx + (TILE - tw2) / 2, y_draw), size=(tw2, th2))
 
-    def _draw_floating_coins(self, h: float) -> None:
-        """Animated coin pickups from `level.floating_coin_tiles` (world space)."""
-        ani = self.sprite_repo.animated.get("coin")
-        if not ani or not ani.frames:
-            return
-        tex, (tw2, th2) = animated_frame_for(
-            ani, self._tick_i // self.COIN_ANIM_TICK_STRIDE
-        )
-        Color(1, 1, 1, 1)
-        for tx, ty in self.level.floating_coin_tiles:
-            sx = tx * TILE + self.camera_x
-            y_top = ty * TILE
-            screen_y_bottom_tile = _world_to_kivy_y(h, y_top, TILE)
-            y_draw = screen_y_bottom_tile + (TILE - th2) * 0.5
-            x_draw = sx + (TILE - tw2) * 0.5
-            Rectangle(texture=tex, pos=(x_draw, y_draw), size=(tw2, th2))
+    def _redraw_sky_drops(self, h: float) -> None:
+        """Server sky drops: falling coin/mushroom and landed pickups."""
+        coin_ani = self.sprite_repo.animated.get("coin")
+        coin_tex = coin_wh = None
+        if coin_ani and coin_ani.frames:
+            coin_tex, coin_wh = animated_frame_for(
+                coin_ani, self._tick_i // self.COIN_ANIM_TICK_STRIDE
+            )
+        mush_tup = self.sprite_repo.get_static("mushroom")
+        mush_tex = mush_wh = None
+        if mush_tup:
+            mush_tex, mush_wh = mush_tup
 
-    def _redraw_mushrooms(self, h: float) -> None:
-        tup = self.sprite_repo.get_static("mushroom")
-        if not tup:
-            return
-        tex, (tw2, th2) = tup
         Color(1, 1, 1, 1)
-        for m in self.mushrooms.entities:
-            px = m.rect.x + self.camera_x
-            py = _world_to_kivy_y(h, m.rect.y, th2)
+        for ent in self.drops.iter_visible():
+            if ent.drop_type == "mushroom":
+                if not mush_tex or not mush_wh:
+                    continue
+                tex, tw2, th2 = mush_tex, mush_wh[0], mush_wh[1]
+            else:
+                if not coin_tex or not coin_wh:
+                    continue
+                tex, tw2, th2 = coin_tex, coin_wh[0], coin_wh[1]
+            px = ent.rect.x + self.camera_x
+            py = _world_to_kivy_y(h, ent.rect.y, th2)
             Rectangle(texture=tex, pos=(px, py), size=(tw2, th2))
 
     def _hud_raster_text(self, text: str, font_size: float = 15.0):
@@ -1104,8 +1131,7 @@ class GameView(Widget):
                     cell = self.level.tiles[ty][tx]
                     self._draw_cell_tile(h, tx, ty, cell)
 
-            self._draw_floating_coins(h)
-            self._redraw_mushrooms(h)
+            self._redraw_sky_drops(h)
             self._redraw_remote_peers(h)
             self._redraw_mario(h)
             self._redraw_fireballs(h)

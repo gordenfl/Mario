@@ -10,7 +10,11 @@ from .level import TILE, Level
 _CLIENT_DIR = Path(__file__).resolve().parents[1] / "client"
 if str(_CLIENT_DIR) not in sys.path:
     sys.path.insert(0, str(_CLIENT_DIR))
-from jump_constants import JUMP_HEIGHT, JUMP_VERTICAL_SPEED  # noqa: E402
+from jump_constants import (  # noqa: E402
+    MARIO_GRAVITY,
+    apply_jump_trait_end_of_frame,
+    jump_deacceleration_height,
+)
 
 
 @dataclass
@@ -24,7 +28,7 @@ class Mario:
         self.level = level
         self.rect = Rect(x_tiles * TILE, y_tiles * TILE, 32, 64)
         self.vel = Vec2(0.0, 0.0)
-        self.gravity = 0.8
+        self.gravity = MARIO_GRAVITY
         self.on_ground = False
         self.heading = 1  # 1 right, -1 left
         # Keep parity with legacy client powerUpState: 0 small, 1 big, 2 fire.
@@ -33,13 +37,7 @@ class Mario:
         self.obey_gravity = True
         self.in_jump = False
         self.jump_start_y = 0.0
-        # Same tuning as pygame `traits.jump` via `client/jump_constants.py`
-        self.jump_vertical_speed = float(JUMP_VERTICAL_SPEED)
-        self.jump_height = float(JUMP_HEIGHT)
-        # deaccelerationHeight = jumpHeight - v^2/(2g)
-        self.jump_deaccel_height = self.jump_height - (
-            (self.jump_vertical_speed * self.jump_vertical_speed) / (2.0 * self.gravity)
-        )
+        self.jump_deaccel_height = jump_deacceleration_height(self.gravity)
 
         # Controls
         self.move_dir = 0.0  # [-1..1]
@@ -69,9 +67,10 @@ class Mario:
         if self.dead:
             return
         # Horizontal acceleration / friction
+        # Match pygame `traits.go.GoTrait` (maxVel 3.2, accelVel 0.4, decelVel 0.25).
         max_v = 3.2
-        accel = 0.45
-        decel = 0.30
+        accel = 0.4
+        decel = 0.25
         if abs(self.move_dir) > 0.05:
             target = self.move_dir * max_v
             if self.vel.x < target:
@@ -84,27 +83,31 @@ class Mario:
             elif self.vel.x < 0:
                 self.vel.x = min(0.0, self.vel.x + decel)
 
-        # Jump (match legacy client behavior: disable gravity briefly to guarantee max height)
-        if self.jump_requested and self.on_ground:
-            self.vel.y = self.jump_vertical_speed
-            self.on_ground = False
-            self.in_jump = True
-            self.jump_start_y = self.rect.y
-            self.obey_gravity = False
-
-        if self.in_jump:
-            if (self.jump_start_y - self.rect.y) >= self.jump_deaccel_height or self.vel.y == 0:
-                self.in_jump = False
-                self.obey_gravity = True
-
-        # Gravity
-        if self.obey_gravity:
-            self.vel.y += self.gravity
-
-        # Integrate + collide Y then X (top-left coordinate system)
+        # Pygame frame order: moveMario -> applyGravity -> JumpTrait.jump (Input).
         self._move_y(self.vel.y)
         self._move_x(self.vel.x)
         self._clamp_to_level_horizontal()
+
+        if self.obey_gravity:
+            self.vel.y += self.gravity
+
+        # Shared JumpTrait.jump (after move + gravity; initial vel applies next tick).
+        (
+            self.vel.y,
+            self.on_ground,
+            self.jump_start_y,
+            self.in_jump,
+            self.obey_gravity,
+        ) = apply_jump_trait_end_of_frame(
+            jumping=self.jump_requested,
+            on_ground=self.on_ground,
+            rect_y=self.rect.y,
+            jump_start_y=self.jump_start_y,
+            vel_y=self.vel.y,
+            in_jump=self.in_jump,
+            obey_gravity=self.obey_gravity,
+            deaccel_height=self.jump_deaccel_height,
+        )
 
         if self.fire_cooldown > 0:
             self.fire_cooldown -= 1

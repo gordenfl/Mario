@@ -1,28 +1,37 @@
-from jump_constants import JUMP_HEIGHT, JUMP_VERTICAL_SPEED
+from jump_constants import (
+    JUMP_VERTICAL_SPEED,
+    apply_jump_trait_end_of_frame,
+    jump_deacceleration_height,
+)
 
 
 class JumpTrait:
     def __init__(self, entity):
         self.verticalSpeed = JUMP_VERTICAL_SPEED
-        self.jumpHeight = JUMP_HEIGHT
         self.entity = entity
         self.initalHeight = 384
-        self.deaccelerationHeight = self.jumpHeight - ((self.verticalSpeed*self.verticalSpeed)/(2*self.entity.gravity))
+        self.deaccelerationHeight = jump_deacceleration_height(entity.gravity)
 
     def jump(self, jumping):
-        if jumping:
-            if self.entity.onGround:
-                self.entity.sound.play_sfx(self.entity.sound.jump)
-                self.entity.vel.y = self.verticalSpeed
-                self.entity.inAir = True
-                self.initalHeight = self.entity.rect.y
-                self.entity.inJump = True
-                self.entity.obeyGravity = False  # always reach maximum height
-
-        if self.entity.inJump:
-            if (self.initalHeight-self.entity.rect.y) >= self.deaccelerationHeight or self.entity.vel.y == 0:
-                self.entity.inJump = False
-                self.entity.obeyGravity = True
+        if jumping and self.entity.onGround:
+            self.entity.sound.play_sfx(self.entity.sound.jump)
+            self.entity.inAir = True
+        (
+            self.entity.vel.y,
+            self.entity.onGround,
+            self.initalHeight,
+            self.entity.inJump,
+            self.entity.obeyGravity,
+        ) = apply_jump_trait_end_of_frame(
+            jumping=jumping,
+            on_ground=self.entity.onGround,
+            rect_y=self.entity.rect.y,
+            jump_start_y=self.initalHeight,
+            vel_y=self.entity.vel.y,
+            in_jump=self.entity.inJump,
+            obey_gravity=self.entity.obeyGravity,
+            deaccel_height=self.deaccelerationHeight,
+        )
 
     def reset(self):
         self.entity.inAir = False

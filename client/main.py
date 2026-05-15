@@ -1,4 +1,5 @@
 import random
+import string
 import sys
 import time
 import uuid
@@ -128,6 +129,11 @@ class Scene:
         raise NotImplementedError
 
 
+def _random_username() -> str:
+    """Six random uppercase letters (A–Z), default login name."""
+    return "".join(random.choices(string.ascii_uppercase, k=6))
+
+
 class LoginScene(Scene):
     def __init__(self, screen, network: NetworkClient):
         super().__init__(screen, network)
@@ -142,6 +148,7 @@ class LoginScene(Scene):
             placeholder="输入用户名...",
             max_length=16,
         )
+        self.input_username.text = _random_username()
         self.button_login = Button(
             rect=(center_x - 80, 300, 160, 48),
             text="进入大厅",
@@ -154,7 +161,7 @@ class LoginScene(Scene):
             return
         username = self.input_username.get_value()
         if not username:
-            username = f"player-{random.randint(1000, 9999)}"
+            username = _random_username()
         try:
             self.in_progress = True
             self.message = "正在连接服务器..."

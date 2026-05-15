@@ -10,6 +10,7 @@ from entities.EntityBase import EntityBase
 from entities.Mushroom import RedMushroom
 from traits.bounce import bounceTrait
 from traits.go import GoTrait
+from jump_constants import MARIO_GRAVITY
 from traits.jump import JumpTrait
 from classes.Pause import Pause
 from ui.widgets import get_font
@@ -36,7 +37,7 @@ bigAnimation = Animation(
 
 
 class Mario(EntityBase):
-    def __init__(self, x, y, level, screen, dashboard, sound, gravity=0.8):
+    def __init__(self, x, y, level, screen, dashboard, sound, gravity=MARIO_GRAVITY):
         super(Mario, self).__init__(x, y, gravity)
         self.camera = Camera(self.rect, self)
         self.sound = sound

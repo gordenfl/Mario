@@ -120,8 +120,8 @@ def _pc_button(text, font_size=22):
 
 
 def _random_username() -> str:
-    """10 random English letters (upper + lower)."""
-    return "".join(random.choices(string.ascii_letters, k=10))
+    """Six random uppercase letters (A–Z), default login name."""
+    return "".join(random.choices(string.ascii_uppercase, k=6))
 
 
 class LoginScreen(Screen):
@@ -144,7 +144,7 @@ class LoginScreen(Screen):
             halign="center",
         )
         self.username_input = TextInput(
-            text="",
+            text=_random_username(),
             hint_text="输入用户名...",
             multiline=False,
             font_size="22sp",
@@ -172,6 +172,12 @@ class LoginScreen(Screen):
         root.add_pc_widget(self.btn_enter, _pc_rect(346, 300, 160, 48))
         root.add_pc_widget(self.status, _pc_rect(80, 360, 692, 82))
         self.add_widget(root)
+
+    def on_enter(self):
+        self.username_input.text = _random_username()
+        self._busy = False
+        self.btn_enter.disabled = False
+        self.status.text = ""
 
     def _attempt_login(self):
         if self._busy:
