@@ -2,6 +2,7 @@ import json
 import pygame
 
 from classes.Sprites import Sprites
+from viewport import compute_virtual_framebuffer
 from classes.Tile import Tile
 from entities.Coin import Coin
 from entities.CoinBrick import CoinBrick
@@ -197,8 +198,10 @@ class Level:
             self.screen.fill((107, 181, 255))
 
         max_rows = len(self.level)
-        visible_rows = max(1, self.screen.get_height() // 32)
-        visible_cols = max(1, self.screen.get_width() // 32 + 2)
+        sw, sh = self.screen.get_size()
+        virtual_w, virtual_h = compute_virtual_framebuffer(sw, sh)
+        visible_rows = max(1, int(virtual_h) // 32)
+        visible_cols = max(1, int(virtual_w) // 32 + 2)
         for y in range(0, min(visible_rows, max_rows)):
             row = self.level[y]
             if row is None:

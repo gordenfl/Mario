@@ -32,6 +32,11 @@ from .effects import BrickDebrisSystem
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+from client.viewport import (  # noqa: E402
+    VIRTUAL_H as _GAME_VIRTUAL_H,
+    VIRTUAL_W as _GAME_VIRTUAL_W,
+    compute_virtual_framebuffer,
+)
 from client.network.protocol import (
     ACTION_FIRE,
     MSG_PLAYER_STATE,
@@ -58,8 +63,8 @@ class _PassthroughLabel(Label):
 
 class GameView(Widget):
     CLIENT_ROOT = Path(__file__).resolve().parents[1] / "client"
-    VIRTUAL_W = 852.0
-    VIRTUAL_H = 480.0
+    VIRTUAL_W = _GAME_VIRTUAL_W
+    VIRTUAL_H = _GAME_VIRTUAL_H
     # Pygame client uses clock.tick(60); physics must advance at 60 Hz even when
     # the device renders at 30/120 Hz (otherwise Mario, drops, mushrooms feel slow).
     PHYSICS_DT = 1.0 / 60.0
@@ -845,17 +850,16 @@ class GameView(Widget):
             self._view_offset = (0.0, 0.0)
             return
 
+        virtual_w, virtual_h = compute_virtual_framebuffer(w, h)
         aspect = w / h
         if aspect >= self.VIRTUAL_MIN_ASPECT:
-            s = h / self.VIRTUAL_H
-            virtual_w = max(float(self.VIRTUAL_W), w / s)
+            s = h / virtual_h
             ox = 0.0
-            oy = (h - self.VIRTUAL_H * s) * 0.5
+            oy = (h - virtual_h * s) * 0.5
         else:
-            s = w / self.VIRTUAL_W
-            virtual_w = float(self.VIRTUAL_W)
-            ox = (w - self.VIRTUAL_W * s) * 0.5
-            oy = (h - self.VIRTUAL_H * s) * 0.5
+            s = w / virtual_w
+            ox = (w - virtual_w * s) * 0.5
+            oy = (h - virtual_h * s) * 0.5
 
         self._virtual_w = virtual_w
         self._view_scale = s

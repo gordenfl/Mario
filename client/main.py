@@ -26,9 +26,10 @@ from network.protocol import (
     ACTION_FIRE,
 )
 from ui.widgets import Button, TextInput, get_font
+from viewport import compute_virtual_framebuffer, default_window_size
 
 
-windowSize = 852, 480
+windowSize = default_window_size()
 
 # Debug: draw the active game camera position in screen space (viewport center).
 DEBUG_DRAW_GAME_CAMERA_POSITION = True
@@ -399,20 +400,27 @@ class LobbyScene(Scene):
         return None
 
 
-def compute_spawn_position(spawn: str, level: Level) -> tuple[int, int]:
+def compute_spawn_position(
+    spawn: str, level: Level, viewport_w: float | None = None
+) -> tuple[int, int]:
     base_y = 32 * 11
+    vw = float(viewport_w if viewport_w is not None else windowSize[0])
     if spawn == "right":
         if level.levelLength:
-            # Keep original gameplay spawn point for right player.
-            spawn_x = max((level.levelLength - 3) * 32, windowSize[0] - 96)
+            spawn_x = max((level.levelLength - 3) * 32, int(vw) - 96)
         else:
-            spawn_x = windowSize[0] - 96
+            spawn_x = int(vw) - 96
     else:
         spawn_x = 48
     return spawn_x, base_y
 
 
-def build_remote_players(room_msg: dict, local_username: str, level: Level):
+def build_remote_players(
+    room_msg: dict,
+    local_username: str,
+    level: Level,
+    viewport_w: float | None = None,
+):
     remote: dict[str, RemotePlayer] = {}
     udp_mapping: dict[int, str] = {}
     for player in room_msg.get("players", []):
@@ -423,7 +431,7 @@ def build_remote_players(room_msg: dict, local_username: str, level: Level):
         if username and username != local_username:
             spawn = player.get("spawn", "right")
             rp = RemotePlayer(username)
-            spawn_x, spawn_y = compute_spawn_position(spawn, level)
+            spawn_x, spawn_y = compute_spawn_position(spawn, level, viewport_w)
             rp.rect.x = spawn_x
             rp.rect.y = spawn_y
             rp.state["position"] = [spawn_x, spawn_y]
@@ -487,12 +495,15 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
 
     mario = Mario(0, 0, level, screen, dashboard, sound)
     spawn = room_ready_msg.get("your_spawn", "left")
-    spawn_x, spawn_y = compute_spawn_position(spawn, level)
+    viewport_w, _ = compute_virtual_framebuffer(*screen.get_size())
+    spawn_x, spawn_y = compute_spawn_position(spawn, level, viewport_w)
     mario.setPos(spawn_x, spawn_y)
     mario.camera.snap_to_entity()
     mario.camera.move()
     dashboard.set_player_health(mario.hp, mario.hp)
-    remote_players, udp_id_map = build_remote_players(room_ready_msg, username, level)
+    remote_players, udp_id_map = build_remote_players(
+        room_ready_msg, username, level, viewport_w
+    )
     players_info = room_ready_msg.get("players", [])
     local_udp_id = None
     for player in players_info:
@@ -643,10 +654,11 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
             spawn_x = float(spawn_x)
         except (TypeError, ValueError):
             return
+        drop_viewport_w, _ = compute_virtual_framebuffer(*screen.get_size())
         if level.levelLength:
             right_bound = max(96, level.levelLength * 32 - 48)
         else:
-            right_bound = max(96, windowSize[0] - 48)
+            right_bound = max(96, int(drop_viewport_w) - 48)
         spawn_x = max(48, min(spawn_x, right_bound))
         sky_drop = SkyDrop(drop_type, spawn_x, screen, level, level.sprites.spriteCollection, sound)
         if drop_type == "mushroom" and direction in (-1, 1):
@@ -803,7 +815,8 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                 # used by level rendering (mario.camera).
                 camera_world_x = max(0, -int(mario.camera.x))
                 camera_world_y = 0
-                level_width = max(level.levelLength * 32, windowSize[0])
+                game_viewport_w, _ = compute_virtual_framebuffer(*screen.get_size())
+                level_width = max(level.levelLength * 32, int(game_viewport_w))
                 for bullet_key, bullet in list(projectiles.items()):
                     owner_name = projectile_owner_map.get(bullet_key, bullet.owner)
                     if owner_name == username:

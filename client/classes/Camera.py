@@ -1,4 +1,5 @@
 from classes.Maths import Vec2D
+from viewport import compute_virtual_framebuffer
 
 
 class Camera:
@@ -12,7 +13,12 @@ class Camera:
         # Use horizontal center so the viewport centers on Mario (sprite anchor is top-left in world).
         xPosFloat = self.entity.rect.centerx / 32.0
         tile_size = 32.0
-        screen_width = float(getattr(getattr(self.entity, "screen", None), "get_width", lambda: 640)())
+        screen = getattr(self.entity, "screen", None)
+        if screen is not None:
+            sw, sh = screen.get_size()
+            screen_width, _ = compute_virtual_framebuffer(sw, sh)
+        else:
+            screen_width = 852.0
         visible_tiles = max(1.0, screen_width / tile_size)
         # Lock horizontal framing: entity center stays at viewport center in X.
         anchor_tiles = visible_tiles * 0.5
