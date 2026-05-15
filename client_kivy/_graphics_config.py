@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import os
 
-# Global client cap (Kivy main loop). Override with MARIO_MAX_FPS if needed.
-DEFAULT_MAX_FPS = 30
+# Global client cap (Kivy main loop). The game physics advances once per
+# scheduled 1/60 tick, so the default must stay at 60 to avoid slow motion.
+# Override with MARIO_MAX_FPS if needed.
+DEFAULT_MAX_FPS = 60
 
 
 def apply_kivy_graphics_config() -> None:

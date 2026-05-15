@@ -1,6 +1,7 @@
 import json
 import logging
 import queue
+import select
 import socket
 import threading
 import time
@@ -60,17 +61,55 @@ class NetworkClient:
     def connect(self, username: str) -> Dict:
         """Connect to the server and perform login. Returns login response."""
         self.username = username
+        logging.info("Connecting to game server %s:%s as %s", self.host, self.port, username)
         self._socket = socket.create_connection((self.host, self.port), timeout=self.timeout)
+
+        response = self._perform_blocking_login(username)
+        if not response:
+            raise NetworkError(f"Timed out waiting for login_ok from {self.host}:{self.port}")
+
         self._socket.setblocking(False)
         self.running = True
         self._writer_thread = threading.Thread(target=self._flush_outgoing, daemon=True)
         self._writer_thread.start()
-        self.send_message({"type": "login", "username": username})
-        response = self.wait_for_message("login_ok")
-        if not response:
-            raise NetworkError("Failed to receive login confirmation")
         self._connected.set()
+        logging.info("Connected to game server as %s", response.get("username", username))
         return response
+
+    def _perform_blocking_login(self, username: str) -> Optional[Dict]:
+        """Complete the login handshake before switching to non-blocking mode."""
+        if not self._socket:
+            raise NetworkError("Socket is not connected")
+        self._socket.settimeout(self.timeout)
+        payload = json.dumps({"type": "login", "username": username}) + NEWLINE
+        self._socket.sendall(payload.encode("utf-8"))
+        logging.debug("Sent blocking login to %s:%s", self.host, self.port)
+
+        deadline = time.time() + self.timeout
+        buffer = ""
+        while time.time() < deadline:
+            try:
+                chunk = self._socket.recv(BUFFER_SIZE)
+            except socket.timeout:
+                break
+            if not chunk:
+                raise NetworkError("Connection closed during login")
+            buffer += chunk.decode("utf-8")
+            while NEWLINE in buffer:
+                line, buffer = buffer.split(NEWLINE, 1)
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if message.get("type") == "login_ok":
+                    self._recv_buffer = buffer
+                    return message
+                self._incoming.put(message)
+        self._recv_buffer = buffer
+        return None
 
     def close(self):
         self.running = False
@@ -280,6 +319,7 @@ class NetworkClient:
 
     def send_message(self, message: Dict):
         data = json.dumps(message) + NEWLINE
+        logging.debug("Queueing message to %s:%s: %s", self.host, self.port, message.get("type"))
         self._outgoing.put(data)
 
     def poll(self) -> List[Dict]:
@@ -338,8 +378,24 @@ class NetworkClient:
             if not self._socket:
                 continue
             try:
-                self._socket.sendall(data.encode("utf-8"))
-            except OSError:
+                self._send_all(data.encode("utf-8"))
+            except (NetworkError, OSError) as exc:
+                logging.warning("Failed to send queued message to %s:%s: %r", self.host, self.port, exc)
                 self.running = False
                 break
 
+    def _send_all(self, data: bytes):
+        """Send all bytes on the non-blocking socket, waiting when needed."""
+        if not self._socket:
+            raise NetworkError("Socket is not connected")
+        view = memoryview(data)
+        total_sent = 0
+        while total_sent < len(view) and self.running:
+            try:
+                sent = self._socket.send(view[total_sent:])
+                if sent == 0:
+                    raise NetworkError("Socket connection broken")
+                total_sent += sent
+            except BlockingIOError:
+                select.select([], [self._socket], [], 0.5)
+        logging.debug("Sent %s bytes to %s:%s", total_sent, self.host, self.port)

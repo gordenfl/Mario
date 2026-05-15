@@ -41,6 +41,82 @@ SERVER_HOST = os.environ.get("MARIO_SERVER_HOST", "192.168.1.75")
 SERVER_PORT = int(os.environ.get("MARIO_SERVER_PORT", "8765"))
 
 REFRESH_INTERVAL_MS = 5000
+VIRTUAL_W = 852.0
+VIRTUAL_H = 480.0
+
+
+def _pc_color(rgb):
+    return tuple(channel / 255.0 for channel in rgb) + (1.0,)
+
+
+def _pc_rect(x: float, y_top: float, w: float, h: float):
+    """Pygame-style top-left rect converted to Kivy's virtual bottom-left space."""
+    return x, VIRTUAL_H - y_top - h, w, h
+
+
+class PcLayout(FloatLayout):
+    """Fixed 852x480 coordinate layout matching the pygame client screens."""
+
+    def __init__(self, bg=(24, 24, 32), **kw):
+        super().__init__(**kw)
+        self._virtual_children = []
+        with self.canvas.before:
+            Color(*_pc_color(bg))
+            self._bg_rect = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=self._relayout, size=self._relayout)
+
+    def add_pc_widget(self, widget, rect):
+        widget.size_hint = (None, None)
+        widget._pc_rect = rect
+        self._virtual_children.append(widget)
+        self.add_widget(widget)
+        self._place(widget)
+        return widget
+
+    def _transform(self, rect):
+        x, y, w, h = rect
+        scale = min(self.width / VIRTUAL_W, self.height / VIRTUAL_H) if self.width and self.height else 1.0
+        ox = self.x + (self.width - VIRTUAL_W * scale) * 0.5
+        oy = self.y + (self.height - VIRTUAL_H * scale) * 0.5
+        return (ox + x * scale, oy + y * scale), (w * scale, h * scale)
+
+    def _place(self, widget):
+        pos, size = self._transform(widget._pc_rect)
+        widget.pos = pos
+        widget.size = size
+        if hasattr(widget, "text_size"):
+            widget.text_size = size
+
+    def _relayout(self, *_args):
+        self._bg_rect.pos = self.pos
+        self._bg_rect.size = self.size
+        for widget in self._virtual_children:
+            self._place(widget)
+
+
+def _pc_label(text, font_size, color=(255, 255, 255), halign="left"):
+    lbl = Label(
+        text=text,
+        font_size=f"{font_size}sp",
+        color=_pc_color(color),
+        halign=halign,
+        valign="middle",
+        **text_font_kwargs(),
+    )
+    return lbl
+
+
+def _pc_button(text, font_size=22):
+    btn = Button(
+        text=text,
+        font_size=f"{font_size}sp",
+        background_normal="",
+        background_down="",
+        background_color=_pc_color((66, 135, 245)),
+        color=(1, 1, 1, 1),
+        **text_font_kwargs(),
+    )
+    return btn
 
 
 def _random_username() -> str:
@@ -54,58 +130,47 @@ class LoginScreen(Screen):
         self.network: Optional[Any] = None
         self._busy = False
 
-        root = AnchorLayout()
-        box = BoxLayout(orientation="vertical", spacing=12, padding=40, size_hint=(0.85, None))
-        box.bind(minimum_height=box.setter("height"))
-
-        title = Label(
+        root = PcLayout(bg=(24, 24, 32))
+        title = _pc_label(
             text="超级马里奥 - 联机版",
-            font_size="28sp",
-            size_hint_y=None,
-            height=dp(44),
-            color=(1, 1, 1, 1),
-            **text_font_kwargs(),
+            font_size=32,
+            color=(255, 255, 255),
+            halign="center",
         )
-        subtitle = Label(
-            text="请输入用户名进入大厅",
-            font_size="16sp",
-            size_hint_y=None,
-            height=dp(28),
-            color=(0.7, 0.7, 0.85, 1),
-            **text_font_kwargs(),
+        subtitle = _pc_label(
+            text="请输入用户名登录游戏",
+            font_size=20,
+            color=(180, 180, 200),
+            halign="center",
         )
         self.username_input = TextInput(
-            text=_random_username(),
-            hint_text="用户名（可留空则随机生成）",
-            multiline=False,
-            size_hint_y=None,
-            height=dp(44),
-            font_size="18sp",
-            **text_font_kwargs(),
-        )
-        self.btn_enter = Button(text="进入大厅", size_hint_y=None, height=dp(48), **text_font_kwargs())
-        self.btn_enter.bind(on_press=lambda *_: self._attempt_login())
-        self.status = Label(
             text="",
-            font_size="14sp",
-            size_hint_y=None,
-            height=dp(60),
-            color=(0.85, 0.85, 0.45, 1),
-            text_size=(None, None),
-            halign="center",
-            valign="middle",
+            hint_text="输入用户名...",
+            multiline=False,
+            font_size="22sp",
+            foreground_color=(1, 1, 1, 1),
+            background_normal="",
+            background_active="",
+            background_color=_pc_color((30, 30, 30)),
+            cursor_color=(1, 1, 1, 1),
+            hint_text_color=(0.58, 0.58, 0.58, 1),
+            padding=[10, 10, 10, 10],
             **text_font_kwargs(),
         )
+        self.btn_enter = _pc_button("进入大厅", font_size=22)
+        self.btn_enter.bind(on_press=lambda *_: self._attempt_login())
+        self.status = _pc_label(
+            text="",
+            font_size=18,
+            color=(220, 220, 100),
+            halign="center",
+        )
 
-        box.add_widget(title)
-        box.add_widget(subtitle)
-        box.add_widget(self.username_input)
-        box.add_widget(self.btn_enter)
-        box.add_widget(self.status)
-
-        wrap = AnchorLayout()
-        wrap.add_widget(box)
-        root.add_widget(wrap)
+        root.add_pc_widget(title, _pc_rect(126, 118, 600, 48))
+        root.add_pc_widget(subtitle, _pc_rect(126, 176, 600, 28))
+        root.add_pc_widget(self.username_input, _pc_rect(266, 220, 320, 48))
+        root.add_pc_widget(self.btn_enter, _pc_rect(346, 300, 160, 48))
+        root.add_pc_widget(self.status, _pc_rect(80, 360, 692, 82))
         self.add_widget(root)
 
     def _attempt_login(self):
@@ -166,79 +231,53 @@ class LobbyScreen(Screen):
         self.waiting_room_id: Optional[str] = None
         self._poll_ev = None
         self._refresh_ms = 0.0
+        self._room_buttons = []
 
-        root = FloatLayout()
+        root = PcLayout(bg=(28, 30, 40))
+        self._pc_root = root
 
-        main = BoxLayout(
-            orientation="vertical",
-            spacing=8,
-            padding=[16, 16, 16, 16],
-            size_hint=(1, 1),
-        )
-        self.title_lbl = Label(
+        self.title_lbl = _pc_label(
             text="欢迎",
-            font_size="22sp",
-            size_hint_y=None,
-            height=dp(36),
+            font_size=30,
+            color=(255, 255, 255),
             halign="left",
-            valign="middle",
-            text_size=(None, None),
-            **text_font_kwargs(),
         )
-        self.hint_lbl = Label(
-            text="点击房间加入，或创建新房间",
-            font_size="14sp",
-            color=(0.65, 0.65, 0.75, 1),
-            size_hint_y=None,
-            height=dp(28),
+        self.hint_lbl = _pc_label(
+            text="点击房间加入，或创建新房间。",
+            font_size=20,
+            color=(180, 180, 200),
             halign="left",
-            **text_font_kwargs(),
         )
-        self.msg_lbl = Label(
+        self.msg_lbl = _pc_label(
             text="",
-            font_size="14sp",
-            color=(0.75, 0.75, 0.45, 1),
-            size_hint_y=None,
-            height=dp(36),
+            font_size=20,
+            color=(200, 200, 120),
             halign="left",
-            valign="top",
-            text_size=(None, None),
-            **text_font_kwargs(),
         )
 
-        scroll = ScrollView(size_hint=(1, 1))
-        self.room_list = BoxLayout(
-            orientation="vertical",
-            spacing=8,
-            size_hint_y=None,
-            padding=[4, 4, 4, 4],
-        )
-        self.room_list.bind(minimum_height=self.room_list.setter("height"))
-        scroll.add_widget(self.room_list)
+        self.button_refresh = _pc_button("刷新", font_size=20)
+        self.button_create = _pc_button("创建房间", font_size=20)
+        self.button_leave = _pc_button("退出登录", font_size=20)
+        self.button_refresh.bind(on_press=lambda *_: self.request_rooms())
+        self.button_create.bind(on_press=lambda *_: self.create_room())
+        self.button_leave.bind(on_press=lambda *_: self.exit_to_login())
 
-        btn_row = BoxLayout(
-            orientation="horizontal",
-            spacing=12,
-            size_hint_y=None,
-            height=dp(48),
-        )
-        b_refresh = Button(text="刷新", **text_font_kwargs())
-        b_create = Button(text="创建房间", **text_font_kwargs())
-        b_leave = Button(text="退出登录", **text_font_kwargs())
-        b_refresh.bind(on_press=lambda *_: self.request_rooms())
-        b_create.bind(on_press=lambda *_: self.create_room())
-        b_leave.bind(on_press=lambda *_: self.exit_to_login())
-        btn_row.add_widget(b_refresh)
-        btn_row.add_widget(b_create)
-        btn_row.add_widget(b_leave)
+        root.add_pc_widget(self.title_lbl, _pc_rect(50, 40, 760, 44))
+        root.add_pc_widget(self.hint_lbl, _pc_rect(50, 90, 760, 32))
+        root.add_pc_widget(self.msg_lbl, _pc_rect(50, 130, 760, 36))
+        root.add_pc_widget(self.button_refresh, _pc_rect(60, 400, 140, 44))
+        root.add_pc_widget(self.button_create, _pc_rect(240, 400, 140, 44))
+        root.add_pc_widget(self.button_leave, _pc_rect(420, 400, 140, 44))
 
-        main.add_widget(self.title_lbl)
-        main.add_widget(self.hint_lbl)
-        main.add_widget(self.msg_lbl)
-        main.add_widget(scroll)
-        main.add_widget(btn_row)
-
-        root.add_widget(main)
+        for idx in range(6):
+            btn = _pc_button("", font_size=19)
+            btn.opacity = 0
+            btn.disabled = True
+            btn.background_color = _pc_color((50, 60, 90))
+            btn.color = _pc_color((230, 230, 240))
+            btn.bind(on_press=partial(self._on_room_button_press, idx))
+            root.add_pc_widget(btn, _pc_rect(60, 180 + idx * 58, VIRTUAL_W - 120, 48))
+            self._room_buttons.append(btn)
 
         # Waiting overlay
         self.overlay = FloatLayout(size_hint=(1, 1), opacity=0)
@@ -247,27 +286,19 @@ class LobbyScreen(Screen):
             self._overlay_rect = Rectangle(pos=(0, 0), size=(100, 100))
         self.overlay.bind(size=self._resize_overlay, pos=self._resize_overlay)
 
-        ov_box = BoxLayout(
-            orientation="vertical",
-            spacing=16,
-            padding=24,
-            size_hint=(0.72, None),
-            height=dp(160),
-            pos_hint={"center_x": 0.5, "center_y": 0.5},
-        )
-        self.overlay_msg = Label(
+        ov_box = PcLayout(bg=(0, 0, 0))
+        ov_box.canvas.before.clear()
+        ov_box.size_hint = (1, 1)
+        self.overlay_msg = _pc_label(
             text="",
-            font_size="16sp",
+            font_size=22,
+            color=(255, 255, 255),
             halign="center",
-            valign="middle",
-            text_size=(None, None),
-            **text_font_kwargs(),
         )
-        self.overlay_msg.bind(size=lambda *_: setattr(self.overlay_msg, "text_size", self.overlay_msg.size))
-        b_cancel = Button(text="取消等待", size_hint_y=None, height=dp(44), **text_font_kwargs())
-        b_cancel.bind(on_press=lambda *_: self.cancel_waiting())
-        ov_box.add_widget(self.overlay_msg)
-        ov_box.add_widget(b_cancel)
+        self.button_cancel = _pc_button("取消等待", font_size=20)
+        self.button_cancel.bind(on_press=lambda *_: self.cancel_waiting())
+        ov_box.add_pc_widget(self.overlay_msg, _pc_rect(80, 205, 692, 44))
+        ov_box.add_pc_widget(self.button_cancel, _pc_rect(336, 280, 180, 48))
         self.overlay.add_widget(ov_box)
 
         root.add_widget(self.overlay)
@@ -422,19 +453,23 @@ class LobbyScreen(Screen):
         self.manager.current = "login"
 
     def _rebuild_room_buttons(self):
-        self.room_list.clear_widgets()
-        for room in self.rooms[:20]:
+        for idx, btn in enumerate(self._room_buttons):
+            if idx >= len(self.rooms[:6]):
+                btn.text = ""
+                btn.opacity = 0
+                btn.disabled = True
+                continue
+            room = self.rooms[idx]
             rid = room.get("room_id", "?")
             players = ", ".join(room.get("players", [])) or "(空)"
-            btn = Button(
-                text=f"房间 {rid}  |  玩家: {players}",
-                size_hint_y=None,
-                height=dp(52),
-                font_size="15sp",
-                **text_font_kwargs(),
-            )
-            btn.bind(on_press=partial(self._on_room_press, str(rid)))
-            self.room_list.add_widget(btn)
+            btn.text = f"房间 {rid} | 玩家: {players}"
+            btn.opacity = 1
+            btn.disabled = False
+
+    def _on_room_button_press(self, idx: int, *_):
+        if idx >= len(self.rooms):
+            return
+        self._on_room_press(str(self.rooms[idx].get("room_id", "")))
 
     def _on_room_press(self, room_id: str, *_):
         if self.waiting or not self.network:
@@ -472,8 +507,8 @@ class GameScreen(Screen):
         box.bind(minimum_height=box.setter("height"))
 
         self._sum_title = Label(
-            text="本局结束",
-            font_size="26sp",
+            text="",
+            font_size="34sp",
             color=(1, 1, 1, 1),
             size_hint_y=None,
             height=dp(40),
@@ -500,7 +535,7 @@ class GameScreen(Screen):
             text_size=(None, None),
             **text_font_kwargs(),
         )
-        btn_wait = Button(text="返回大厅等待", size_hint_y=None, height=dp(48), **text_font_kwargs())
+        btn_wait = Button(text="返回大厅", size_hint_y=None, height=dp(48), **text_font_kwargs())
         btn_wait.bind(on_press=self._on_summary_back_to_lobby)
 
         box.add_widget(self._sum_title)
@@ -524,16 +559,12 @@ class GameScreen(Screen):
         wn = payload.get("winner")
         ls = payload.get("loser")
 
-        def line(role_cn: str, name: Optional[str]) -> str:
-            if not name:
-                return f"{role_cn}：—"
-            if my_name and name == my_name:
-                return f"{role_cn}：{name}（你）"
-            return f"{role_cn}：{name}"
-
-        self._sum_winner.text = line("胜者", wn if isinstance(wn, str) else None)
-        ls_disp = ls if isinstance(ls, str) else None
-        self._sum_loser.text = line("败者", ls_disp)
+        winner = wn if isinstance(wn, str) and wn else "玩家"
+        if my_name and winner == my_name:
+            winner = f"{winner}（你）"
+        self._sum_title.text = f"{winner} 获胜！"
+        self._sum_winner.text = ""
+        self._sum_loser.text = ""
         self._summary_layer.disabled = False
         self._summary_layer.opacity = 1
         # Always stack above GameView (last child draws on top in FloatLayout).

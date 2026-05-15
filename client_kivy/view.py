@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, Optional
 
 from kivy.clock import Clock
 from kivy.core.window import Keyboard, Window
-from kivy.graphics import Color, Ellipse, PopMatrix, PushMatrix, Rectangle, Scale, Translate
+from kivy.graphics import Color, Ellipse, Line, PopMatrix, PushMatrix, Rectangle, Scale, Translate
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
@@ -60,6 +60,7 @@ class GameView(Widget):
     CLIENT_ROOT = Path(__file__).resolve().parents[1] / "client"
     VIRTUAL_W = 852.0
     VIRTUAL_H = 480.0
+    VIRTUAL_MIN_ASPECT = VIRTUAL_W / VIRTUAL_H
     # Pit / fall-off death: match pygame `client/main.py` (`fall_threshold`, rect.bottom).
     # Do not compare rect.y (sprite top) — that mis-detects vertical position vs “fell through bottom”.
     FALL_DEATH_BOTTOM_PX = 440.0
@@ -80,6 +81,7 @@ class GameView(Widget):
     HUD_COUNT_TEXT_AFTER_ICON = 28.0
     # Larger = slower coin spin (game ticks per sprite frame at ~60Hz).
     COIN_ANIM_TICK_STRIDE = 10
+    DEBUG_DRAW_GAME_CAMERA_POSITION = True
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -95,6 +97,7 @@ class GameView(Widget):
         self.camera_x = 0.0
         self._dt = 1.0 / 60.0
         self._tick_i = 0
+        self._virtual_w = float(self.VIRTUAL_W)
         self._view_scale = 1.0
         self._view_offset = (0.0, 0.0)
 
@@ -152,6 +155,7 @@ class GameView(Widget):
             **text_font_kwargs(),
         )
         self.add_widget(self._pos_corner_lbl)
+        self._pos_corner_lbl.opacity = 0.0
 
         self._remote_name_lbls: Dict[str, _PassthroughLabel] = {}
 
@@ -172,7 +176,7 @@ class GameView(Widget):
         touch_v.x = vx
         touch_v.y = vy
         touch_v.uid = touch.uid
-        return self.controls.on_touch_down(touch_v, self.VIRTUAL_W, self.VIRTUAL_H) or super().on_touch_down(touch)
+        return self.controls.on_touch_down(touch_v, self._virtual_w, self.VIRTUAL_H) or super().on_touch_down(touch)
 
     def on_touch_move(self, touch):
         vx, vy = self._to_virtual(touch.x, touch.y)
@@ -281,14 +285,14 @@ class GameView(Widget):
         self._net = network
         self._username = (username or "").strip()
         self._remotes = build_remote_peers(
-            room_ready, self._username, self.level.length_tiles, self.VIRTUAL_W
+            room_ready, self._username, self.level.length_tiles, self._virtual_w
         )
         self._udp_username_map, self._local_udp_id = build_udp_username_map(room_ready, self._username)
         if self._local_udp_id is not None:
             self._udp_username_map[self._local_udp_id] = self._username
 
         spawn = room_ready.get("your_spawn", "left")
-        sx, sy = compute_spawn_xy(str(spawn), self.level.length_tiles, self.VIRTUAL_W)
+        sx, sy = compute_spawn_xy(str(spawn), self.level.length_tiles, self._virtual_w)
         self.mario.rect.x = sx
         self.mario.rect.y = sy
         self.mario.vel.x = 0.0
@@ -381,6 +385,8 @@ class GameView(Widget):
         """World (x, y) bottom-left of the game view (letterboxed), black text."""
         if self._pos_corner_lbl is None:
             return
+        self._pos_corner_lbl.opacity = 0.0
+        return
         self._compute_view_transform()
         mr = self.mario.rect
         self._pos_corner_lbl.text = f"({mr.x:.0f}, {mr.y:.0f})"
@@ -510,7 +516,7 @@ class GameView(Widget):
 
         display = (self._username or "").strip()
         self._name_lbl.text = display
-        self._name_lbl.opacity = 1.0 if display else 0.0
+        self._name_lbl.opacity = 0.0
         nw, nh = self._name_lbl.texture_size
         self._name_lbl.size = (max(nw, 1), max(nh, 1))
         win_y_name = oy + stack_v * s
@@ -757,7 +763,7 @@ class GameView(Widget):
                     self.level,
                 )
 
-        level_w = max(float(self.level.length_tiles * TILE), self.VIRTUAL_W)
+        level_w = max(float(self.level.length_tiles * TILE), self._virtual_w)
         projectile_sends = self.projectiles.step(
             self.level,
             level_w,
@@ -796,8 +802,8 @@ class GameView(Widget):
             self._flush_udp_outbound()
 
         # Camera is computed in *virtual* pixels, independent of window scaling.
-        target = -self.mario.rect.centerx + self.VIRTUAL_W * 0.5
-        max_scroll = max(self.level.length_tiles * TILE - self.VIRTUAL_W, 0.0)
+        target = -self.mario.rect.centerx + self._virtual_w * 0.5
+        max_scroll = max(self.level.length_tiles * TILE - self._virtual_w, 0.0)
         self.camera_x = max(-max_scroll, min(0.0, target))
 
         self._redraw()
@@ -806,12 +812,24 @@ class GameView(Widget):
         w = float(self.width)
         h = float(self.height)
         if w <= 1 or h <= 1:
+            self._virtual_w = float(self.VIRTUAL_W)
             self._view_scale = 1.0
             self._view_offset = (0.0, 0.0)
             return
-        s = min(w / self.VIRTUAL_W, h / self.VIRTUAL_H)
-        ox = (w - self.VIRTUAL_W * s) * 0.5
-        oy = (h - self.VIRTUAL_H * s) * 0.5
+
+        aspect = w / h
+        if aspect >= self.VIRTUAL_MIN_ASPECT:
+            s = h / self.VIRTUAL_H
+            virtual_w = max(float(self.VIRTUAL_W), w / s)
+            ox = 0.0
+            oy = (h - self.VIRTUAL_H * s) * 0.5
+        else:
+            s = w / self.VIRTUAL_W
+            virtual_w = float(self.VIRTUAL_W)
+            ox = (w - self.VIRTUAL_W * s) * 0.5
+            oy = (h - self.VIRTUAL_H * s) * 0.5
+
+        self._virtual_w = virtual_w
         self._view_scale = s
         self._view_offset = (ox, oy)
 
@@ -928,96 +946,57 @@ class GameView(Widget):
         core.refresh()
         return core.texture
 
+    def _draw_hud_text(self, text: str, x: float, y_top: float, size: float) -> None:
+        tex = self._hud_raster_text(text, size)
+        if not tex:
+            return
+        Color(1, 1, 1, 1)
+        Rectangle(texture=tex, pos=(x, self.VIRTUAL_H - y_top - tex.height), size=tex.size)
+
+    def _draw_pc_health_bar(self, x: float, y_top: float, width: float, height: float) -> None:
+        y = self.VIRTUAL_H - y_top - height
+        Color(40 / 255.0, 40 / 255.0, 40 / 255.0, 1)
+        Rectangle(pos=(x, y), size=(width, height))
+        Color(10 / 255.0, 10 / 255.0, 10 / 255.0, 1)
+        Rectangle(pos=(x + 2, y + 2), size=(width - 4, height - 4))
+        ratio = max(0.0, min(1.0, float(self.mario.hp) / float(self.MARIO_MAX_HP)))
+        if ratio > 0:
+            Color(220 / 255.0, 50 / 255.0, 40 / 255.0, 1)
+            Rectangle(pos=(x + 2, y + 2), size=((width - 4) * ratio, height - 4))
+        self._draw_hud_text("HP", x, y_top - 18, 14)
+        self._draw_hud_text(f"{int(max(0, self.mario.hp)):02d}/{self.MARIO_MAX_HP:02d}", x + width + 12, y_top - 2, 12)
+
+    def _draw_camera_debug_box(self, w: float, h: float) -> None:
+        if not self.DEBUG_DRAW_GAME_CAMERA_POSITION:
+            return
+        cx, cy = w * 0.5, h * 0.5
+        half = 10.0
+        Color(0.0, 1.0, 200 / 255.0, 1.0)
+        x0, y0 = cx - half, cy - half
+        x1, y1 = cx + half, cy + half
+        step = 8.0
+        seg = 4.0
+        x = x0
+        while x < x1:
+            Line(points=[x, y0, min(x + seg, x1), y0], width=2)
+            Line(points=[x, y1, min(x + seg, x1), y1], width=2)
+            x += step
+        y = y0
+        while y < y1:
+            Line(points=[x0, y, x0, min(y + seg, y1)], width=2)
+            Line(points=[x1, y, x1, min(y + seg, y1)], width=2)
+            y += step
+
     def _draw_hud_strip(self, w: float, h: float) -> None:
-        """Top bar: HP tag + progress bar, coin/mushroom icons + X count text (canvas)."""
-        bar_h = self.HUD_BAR_H
-        Color(0.0, 0.0, 0.0, 0.48)
-        Rectangle(pos=(0.0, h - bar_h), size=(w, bar_h))
-
-        bh = self.HUD_HP_BAR_H
-        by = h - bar_h + max(0.0, (bar_h - bh) * 0.5)
-
-        tex_hp = self._hud_raster_text("HP")
-        tag_w = float(tex_hp.width) if tex_hp else 26.0
-        tag_th = float(tex_hp.height) if tex_hp else bh
-        bx = self.HUD_PAD_X + tag_w + self.HUD_HP_TAG_GAP
-        bw = self.HUD_HP_BAR_W
-
-        max_hp = float(self.MARIO_MAX_HP)
-        cur = max(0.0, min(float(self.mario.hp), max_hp))
-        ratio = cur / max_hp if max_hp > 0 else 0.0
-
-        Color(0.22, 0.22, 0.24, 1.0)
-        Rectangle(pos=(bx, by), size=(bw, bh))
-        if ratio > 0.0:
-            Color(0.22, 0.82, 0.32, 1.0)
-            Rectangle(pos=(bx, by), size=(bw * ratio, bh))
-
-        if tex_hp:
-            ty = by + max(0.0, (bh - tag_th) * 0.5)
-            Color(1, 1, 1, 1)
-            Rectangle(texture=tex_hp, pos=(self.HUD_PAD_X, ty), size=tex_hp.size)
-
-        slot = 22.0
-        icon_max = 20.0
-        y_slot_bottom = h - bar_h + (bar_h - slot) * 0.5
-
-        coin_icon_x = bx + bw + self.HUD_HP_GAP_AFTER
-        mush_icon_x = coin_icon_x + self.HUD_COIN_MUSH_ICON_GAP
-
-        ani = self.sprite_repo.animated.get("coin")
-        if ani and ani.frames:
-            tex, (tw, th) = animated_frame_for(
-                ani, self._tick_i // self.COIN_ANIM_TICK_STRIDE
-            )
-            scale = icon_max / max(float(tw), float(th))
-            dw, dh = tw * scale, th * scale
-            Color(1, 1, 1, 1)
-            Rectangle(
-                texture=tex,
-                pos=(
-                    coin_icon_x + (slot - dw) * 0.5,
-                    y_slot_bottom + (slot - dh) * 0.5,
-                ),
-                size=(dw, dh),
-            )
-
-        mush = self.sprite_repo.get_static("mushroom")
-        if mush:
-            tex, (tw, th) = mush
-            scale = icon_max / max(float(tw), float(th))
-            dw, dh = tw * scale, th * scale
-            Color(1, 1, 1, 1)
-            Rectangle(
-                texture=tex,
-                pos=(
-                    mush_icon_x + (slot - dw) * 0.5,
-                    y_slot_bottom + (slot - dh) * 0.5,
-                ),
-                size=(dw, dh),
-            )
-
-        coin_txt = self._hud_raster_text(f"X {self.mario.coins}")
-        if coin_txt:
-            _, cth = coin_txt.size
-            cty = by + max(0.0, (bh - cth) * 0.5)
-            Color(1, 1, 1, 1)
-            Rectangle(
-                texture=coin_txt,
-                pos=(coin_icon_x + self.HUD_COUNT_TEXT_AFTER_ICON, cty),
-                size=coin_txt.size,
-            )
-
-        mush_txt = self._hud_raster_text(f"X {self.mario.mushrooms_eaten}")
-        if mush_txt:
-            _, mth = mush_txt.size
-            mty = by + max(0.0, (bh - mth) * 0.5)
-            Color(1, 1, 1, 1)
-            Rectangle(
-                texture=mush_txt,
-                pos=(mush_icon_x + self.HUD_COUNT_TEXT_AFTER_ICON, mty),
-                size=mush_txt.size,
-            )
+        """Draw the pygame Dashboard-style HUD in the same virtual coordinates."""
+        self._draw_hud_text("MARIO", 50, 20, 15)
+        self._draw_hud_text("000000", 50, 37, 15)
+        self._draw_hud_text(f"@x{int(self.mario.coins):02d}", 225, 37, 15)
+        self._draw_hud_text("WORLD", 380, 20, 15)
+        self._draw_hud_text("1-1", 395, 37, 15)
+        self._draw_hud_text("TIME", 520, 20, 15)
+        self._draw_hud_text(f"{int(self._tick_i // 60):03d}", 535, 37, 15)
+        self._draw_pc_health_bar(48, 62, 200, 14)
 
     def _redraw_mario(self, h: float):
         mr = self.mario.rect
@@ -1099,7 +1078,7 @@ class GameView(Widget):
     def _redraw(self):
         self.canvas.clear()
         self._compute_view_transform()
-        w = float(self.VIRTUAL_W)
+        w = float(self._virtual_w)
         h = float(self.VIRTUAL_H)
 
         with self.canvas:
@@ -1132,15 +1111,8 @@ class GameView(Widget):
             self._redraw_fireballs(h)
             self.effects.draw(self.camera_x, self.VIRTUAL_H)
 
-            if self.controls.joy.active and not self.mario.dead:
-                cx, cy = self.controls.joy.center
-                kx, ky = self.controls.joy.knob
-                Color(0.0, 0.0, 0.0, 0.18)
-                Ellipse(pos=(cx - 48, cy - 48), size=(96, 96))
-                Color(1.0, 1.0, 1.0, 0.18)
-                Ellipse(pos=(kx - 28, ky - 28), size=(56, 56))
-
             self._draw_hud_strip(w, h)
+            self._draw_camera_debug_box(w, h)
 
             PopMatrix()
 
