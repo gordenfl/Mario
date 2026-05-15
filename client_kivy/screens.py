@@ -613,6 +613,7 @@ class GameScreen(Screen):
         if self.room_ready_message and net:
             self._game_view.configure_online(net, uname, self.room_ready_message)
         else:
+            self._game_view._reload_level_from_disk()
             self._game_view.configure_offline()
         self._game_view.set_local_username(uname)
         self._game_view.bind_keyboard()

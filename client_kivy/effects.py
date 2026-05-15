@@ -36,6 +36,9 @@ class BrickDebrisSystem:
         self.gravity = 0.6
         self._brick_quads: Optional[List[Tuple[Texture, Tuple[int, int]]]] = None
 
+    def clear(self) -> None:
+        self._effects.clear()
+
     def _ensure_quads(self, bricks_tex: Texture, bricks_wh: Tuple[int, int]) -> None:
         if self._brick_quads is not None:
             return

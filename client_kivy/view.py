@@ -98,7 +98,8 @@ class GameView(Widget):
         self.sprite_repo = SpriteRepository(self.CLIENT_ROOT)
         self.sprite_repo.load_all()
 
-        self.level = Level.from_json(self.CLIENT_ROOT / "levels" / "Level1-1.json")
+        self._level_path = self.CLIENT_ROOT / "levels" / "Level1-1.json"
+        self.level = Level.from_json(self._level_path)
         self.mario = Mario(2, 10, self.level)
         self.projectiles = ProjectileSystem()
         self.effects = BrickDebrisSystem()
@@ -289,8 +290,14 @@ class GameView(Widget):
         if act:
             self._set_kb_control(act, False)
 
+    def _reload_level_from_disk(self) -> None:
+        """Fresh map each match (pygame `run_game` calls `loadLevel` on a new Level)."""
+        self.level = Level.from_json(self._level_path)
+        self.mario.level = self.level
+
     def configure_online(self, network: Any, username: str, room_ready: dict) -> None:
         """Spawn position, remotes, UDP map, enable UDP (matches pygame client flow)."""
+        self._reload_level_from_disk()
         self.configure_offline()
         self._net = network
         self._username = (username or "").strip()
@@ -377,6 +384,7 @@ class GameView(Widget):
         self.mario.mushrooms_eaten = 0
         self.drops.clear()
         self.projectiles.clear()
+        self.effects.clear()
         self._physics_accum = 0.0
         self._fall_reported = False
         self._game_over_payload = None
