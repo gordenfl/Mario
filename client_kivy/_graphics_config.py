@@ -24,10 +24,9 @@ def apply_kivy_graphics_config() -> None:
         cap = max(15, min(120, int(raw)))
     else:
         cap = DEFAULT_MAX_FPS
-    # iOS often defaults to 30 FPS; uncapped redraw lets the fixed 60 Hz physics loop
-    # catch up via substeps while still rendering smoothly when possible.
-    if kivy_platform == "ios" and not raw.isdigit():
-        cap = 120
+    # Physics uses a fixed 60 Hz accumulator; capping draw at 60 saves GPU/CPU on mobile.
+    if kivy_platform in ("ios", "android") and not raw.isdigit():
+        cap = DEFAULT_MAX_FPS
     Config.set("graphics", "maxfps", str(cap))
 
     try:

@@ -90,7 +90,7 @@ class GameView(Widget):
     HUD_COUNT_TEXT_AFTER_ICON = 28.0
     # Larger = slower coin spin (game ticks per sprite frame at ~60Hz).
     COIN_ANIM_TICK_STRIDE = 10
-    DEBUG_DRAW_GAME_CAMERA_POSITION = True
+    DEBUG_DRAW_GAME_CAMERA_POSITION = False
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -177,8 +177,8 @@ class GameView(Widget):
         self._kb_fire = False
 
         self.bind(size=self._on_size)
-        # interval=0: callback every frame; real dt is fed into a 60 Hz fixed timestep.
-        Clock.schedule_interval(self._tick, 0)
+        self._tick_ev = None
+        self._hud_tex_cache: Dict[tuple, Any] = {}
 
     def on_touch_down(self, touch):
         vx, vy = self._to_virtual(touch.x, touch.y)
@@ -204,6 +204,17 @@ class GameView(Widget):
         touch_v.y = vy
         touch_v.uid = touch.uid
         return self.controls.on_touch_up(touch_v) or super().on_touch_up(touch)
+
+    def start_tick(self) -> None:
+        """Start game loop (GameScreen.on_enter). Avoids 60–120 Hz redraw while in lobby."""
+        if self._tick_ev is not None:
+            return
+        self._tick_ev = Clock.schedule_interval(self._tick, self.PHYSICS_DT)
+
+    def stop_tick(self) -> None:
+        if self._tick_ev is not None:
+            self._tick_ev.cancel()
+            self._tick_ev = None
 
     def bind_keyboard(self) -> None:
         """Attach global key handlers (GameScreen.on_enter — avoids stealing keys from login)."""
@@ -497,6 +508,8 @@ class GameView(Widget):
             return
         self._match_cb_misses = 0
         self._match_end_fired = True
+        self._redraw()
+        self.stop_tick()
         Clock.schedule_once(lambda _dt: cb(data), 0)
 
     def _sprite_top_virtual(
@@ -727,7 +740,6 @@ class GameView(Widget):
             self._poll_tcp_messages()
 
         if self._match_end_fired and self._death_phase is None:
-            self._redraw()
             return
 
         if self._death_phase is not None:
@@ -974,15 +986,20 @@ class GameView(Widget):
             Rectangle(texture=tex, pos=(px, py), size=(tw2, th2))
 
     def _hud_raster_text(self, text: str, font_size: float = 15.0):
-        """Raster HUD strings onto canvas (same coords as HP strip); avoids Label widget stacking issues."""
+        """Raster HUD strings onto canvas; cache textures (time/HP strings change rarely)."""
         from kivy.core.text import Label as CoreLabel
 
-        opts: Dict[str, Any] = {"text": text, "font_size": font_size, "color": (1, 1, 1, 1)}
         fn = get_ui_font_name()
+        key = (text, font_size, fn)
+        cached = self._hud_tex_cache.get(key)
+        if cached is not None:
+            return cached
+        opts: Dict[str, Any] = {"text": text, "font_size": font_size, "color": (1, 1, 1, 1)}
         if fn:
             opts["font_name"] = fn
         core = CoreLabel(**opts)
         core.refresh()
+        self._hud_tex_cache[key] = core.texture
         return core.texture
 
     def _draw_hud_text(self, text: str, x: float, y_top: float, size: float) -> None:

@@ -28,6 +28,24 @@ class MarioFightKivyApp(App):
 
         return build_screen_manager()
 
+    def on_pause(self):
+        """Stop the game loop while backgrounded (saves battery on iOS/Android)."""
+        root = self.root
+        if root and hasattr(root, "get_screen"):
+            game = root.get_screen("game")
+            gv = getattr(game, "_game_view", None)
+            if gv is not None:
+                gv.stop_tick()
+        return True
+
+    def on_resume(self):
+        root = self.root
+        if root and hasattr(root, "get_screen") and getattr(root, "current", None) == "game":
+            game = root.get_screen("game")
+            gv = getattr(game, "_game_view", None)
+            if gv is not None and not getattr(gv, "_match_end_fired", False):
+                gv.start_tick()
+
 
 if __name__ == "__main__":
     MarioFightKivyApp().run()

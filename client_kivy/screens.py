@@ -327,7 +327,7 @@ class LobbyScreen(Screen):
 
     def on_enter(self):
         if self._poll_ev is None:
-            self._poll_ev = Clock.schedule_interval(self._poll_network, 1.0 / 60.0)
+            self._poll_ev = Clock.schedule_interval(self._poll_network, 0.5)
         # Always refetch list data when the lobby is shown (matches server waiting-only snapshot).
         if self.network:
             self.network.request_room_list()
@@ -617,9 +617,11 @@ class GameScreen(Screen):
             self._game_view.configure_offline()
         self._game_view.set_local_username(uname)
         self._game_view.bind_keyboard()
+        self._game_view.start_tick()
 
     def on_leave(self):
         if self._game_view is not None:
+            self._game_view.stop_tick()
             self._game_view.unbind_keyboard()
             self._game_view.configure_offline()
 
