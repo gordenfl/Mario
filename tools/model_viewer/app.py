@@ -66,6 +66,7 @@ class ModelViewerApp:
         self._pending_asset: Optional[Path] = None
         self._loaded_source: Optional[Path] = None
         self._pending_reframe = 0
+        self._pending_refresh_models = False
 
         self.canvas = RenderCanvas(
             size=(1400, 720),
@@ -160,6 +161,28 @@ class ModelViewerApp:
     def _cache_dir(self, model: ModelEntry | None = None) -> Path:
         model = model or self.current_model
         return CACHE_DIR / model.cache_key
+
+    def _refresh_model_list(self) -> None:
+        prev_name = self.models[self.model_index].name if self.models else None
+        self.models = discover_models()
+        if not self.models:
+            self.status = f"未找到模型目录: {MODEL_ROOT}"
+            self.model_index = 0
+            self.actions = []
+            self._clear_scene()
+            self._loaded_source = None
+            return
+
+        self.model_index = 0
+        if prev_name is not None:
+            for i, model in enumerate(self.models):
+                if model.name == prev_name:
+                    self.model_index = i
+                    break
+
+        model = self.current_model
+        self.actions = discover_animations(model)
+        self.status = f"已刷新 · {len(self.models)} 个模型 · {model.name}"
 
     def _select_model(self, index: int) -> None:
         self.model_index = max(0, min(index, len(self.models) - 1))
@@ -287,7 +310,11 @@ class ModelViewerApp:
         imgui.text_wrapped(f"根目录:\n{MODEL_ROOT}")
         imgui.separator()
 
+        imgui.align_text_to_frame_padding()
         imgui.text("模型列表")
+        imgui.same_line()
+        if imgui.small_button("刷新"):
+            self._pending_refresh_models = True
         imgui.begin_child(
             "model_list",
             imgui.ImVec2(0, 140),
@@ -374,6 +401,11 @@ class ModelViewerApp:
         imgui.end()
 
     def _process_pending(self) -> None:
+        if self._pending_refresh_models:
+            self._pending_refresh_models = False
+            self._refresh_model_list()
+            return
+
         if self._pending_model_index is not None:
             idx = self._pending_model_index
             self._pending_model_index = None
