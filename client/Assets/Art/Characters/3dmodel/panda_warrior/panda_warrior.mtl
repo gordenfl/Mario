@@ -1,0 +1,14 @@
+# Blender 5.0.1 MTL File: 'None'
+# www.blender.org
+
+newmtl tripo_mat_61a24535-f440-4d4e-939d-08868f579528.001
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd pandawarrior3dmodel_basecolor.JPEG
+map_Ns pandawarrior3dmodel_roughness.JPEG
+map_refl pandawarrior3dmodel_metallic.JPEG
+map_Bump -bm 1.000000 pandawarrior3dmodel_normal.JPEG
