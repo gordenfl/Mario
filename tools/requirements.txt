@@ -1,0 +1,7 @@
+pygfx>=0.16.0
+rendercanvas>=1.4.0
+imgui-bundle>=1.5.0
+gltflib>=1.0.0
+imageio>=2.34.0
+pyglm
+Pillow
