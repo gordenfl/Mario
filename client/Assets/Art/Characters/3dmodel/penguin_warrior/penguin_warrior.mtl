@@ -1,0 +1,14 @@
+# Blender 5.0.1 MTL File: 'None'
+# www.blender.org
+
+newmtl tripo_mat_b83ff84d-87bf-4672-a26a-c2c749aad829.002
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd cutepenguin3dmodel_Clone1_basecolor.JPEG
+map_Ns cutepenguin3dmodel_Clone1_roughness.JPEG
+map_refl cutepenguin3dmodel_Clone1_metallic.JPEG
+map_Bump -bm 1.000000 cutepenguin3dmodel_Clone1_normal.JPEG

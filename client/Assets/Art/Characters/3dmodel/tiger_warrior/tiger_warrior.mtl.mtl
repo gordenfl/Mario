@@ -1,0 +1,14 @@
+# Blender 5.0.1 MTL File: 'None'
+# www.blender.org
+
+newmtl tripo_mat_d6e5ab00-9f85-4827-b4c7-7bf1a1bd35de
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd cartoontiger3dmodel_basecolor.JPEG
+map_Ns cartoontiger3dmodel_roughness.JPEG
+map_refl cartoontiger3dmodel_metallic.JPEG
+map_Bump -bm 1.000000 cartoontiger3dmodel_normal.JPEG
