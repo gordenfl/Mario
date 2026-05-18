@@ -39,6 +39,7 @@ from ui.wall_title import (
     draw_login_title_text,
     draw_wall_frame_bricks,
 )
+from ui.lobby_decor import LobbyDecor
 from ui.lobby_icons import build_lobby_icons
 from ui.widgets import Button, IconButton, TextInput, get_font
 from viewport import compute_virtual_framebuffer, default_window_size
@@ -256,6 +257,7 @@ class LobbyScene(Scene):
         sw, sh = windowSize
         sprites = self._sprites.spriteCollection
         ground = ground_band_rect(sw, sh, sprites)
+        self._ground_rect = ground
         sky_floor = ground.top - LOBBY_UI_GAP_ABOVE_GROUND
         m = LOBBY_ROOM_PANEL_MARGIN
         self._room_panel_rect = pygame.Rect(
@@ -268,6 +270,16 @@ class LobbyScene(Scene):
         self.font_body = get_font(26)
         self.font_room = get_font(22)
         self.font_panel_title = get_font(26, bold=True)
+        self.font_subtitle = get_font(22)
+        self.font_empty = get_font(20)
+        self._hovered_room_idx: int | None = None
+        self._decor = LobbyDecor(
+            sw,
+            sh,
+            sprites,
+            ground_top=ground.top,
+            panel_left=self._room_panel_rect.left,
+        )
         self.rooms = []
         self.message = ""
         self.waiting = False
@@ -363,6 +375,14 @@ class LobbyScene(Scene):
         self.button_leave.update(mouse_pos)
         if self.waiting:
             self.button_cancel.update(mouse_pos)
+        self._decor.update(dt_ms)
+        self._hovered_room_idx = None
+        if not self.waiting:
+            for idx, room in enumerate(self.rooms[:12]):
+                rect = room.get("__rect")
+                if rect and rect.collidepoint(mouse_pos):
+                    self._hovered_room_idx = idx
+                    break
         self.last_refresh_time += dt_ms
         if (
             not self.waiting
@@ -422,6 +442,15 @@ class LobbyScene(Scene):
         row_step = LOBBY_ROOM_ROW_HEIGHT + LOBBY_ROOM_ROW_GAP
         max_rows = max(0, (list_bottom - list_top) // row_step)
 
+        if max_rows == 0 and not self.rooms:
+            empty = self.font_empty.render(
+                "No rooms yet — tap + to create one", True, (50, 50, 50)
+            )
+            self.screen.blit(
+                empty,
+                empty.get_rect(center=(inner.centerx, (list_top + inner.bottom) // 2)),
+            )
+
         for idx, room in enumerate(self.rooms[:max_rows]):
             rect = pygame.Rect(
                 inner.x,
@@ -429,6 +458,10 @@ class LobbyScene(Scene):
                 inner.width,
                 LOBBY_ROOM_ROW_HEIGHT,
             )
+            if idx == self._hovered_room_idx:
+                hover = pygame.Surface(rect.size, pygame.SRCALPHA)
+                hover.fill((120, 180, 255, 70))
+                self.screen.blit(hover, rect.topleft)
             pygame.draw.rect(self.screen, (90, 90, 90), rect, width=1, border_radius=4)
             self._blit_room_row(rect, room)
             room["__rect"] = rect
@@ -453,10 +486,21 @@ class LobbyScene(Scene):
 
     def draw(self):
         draw_sky_ground_background(self.screen, self._sprites.spriteCollection)
-        title = self.font_title.render(
-            f"Welcome, {self.username}", True, LOBBY_NAME_COLOR
+        self._decor.draw(self.screen)
+        self._decor.draw_divider(
+            self.screen,
+            LOBBY_ROOM_PANEL_MARGIN,
+            self._ground_rect.top - LOBBY_UI_GAP_ABOVE_GROUND,
         )
-        self.screen.blit(title, (LOBBY_LEFT_MARGIN, 40))
+
+        welcome = f"Welcome, {self.username}"
+        shadow = self.font_title.render(welcome, True, (255, 255, 255))
+        title = self.font_title.render(welcome, True, LOBBY_NAME_COLOR)
+        tx, ty = LOBBY_LEFT_MARGIN, 36
+        self.screen.blit(shadow, (tx + 2, ty + 2))
+        self.screen.blit(title, (tx, ty))
+        subtitle = self.font_subtitle.render("Multiplayer Lobby", True, (30, 90, 140))
+        self.screen.blit(subtitle, (tx, ty + title.get_height() + 4))
 
         self.button_refresh.draw(self.screen)
         self.button_create.draw(self.screen)
