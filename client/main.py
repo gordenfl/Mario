@@ -29,7 +29,9 @@ from network.protocol import (
 from ui.sky_background import (
     LoginDriftingClouds,
     draw_login_sky,
+    draw_ground_tiles,
     draw_sky_ground_background,
+    draw_sky_tiles,
     ground_band_rect,
 )
 from ui.login_frame_mushrooms import LoginFrameMushrooms
@@ -56,6 +58,8 @@ LOBBY_ROOM_ROW_GAP = 8
 LOBBY_NAME_COLOR = (0, 0, 0)
 LOBBY_ICON_BTN_SIZE = 52
 LOBBY_ICON_BTN_GAP = 16
+LOBBY_ROOM_HEADER_BTN_SIZE = 44
+LOBBY_ROOM_HEADER_BTN_GAP = 6
 LOBBY_UI_GAP_ABOVE_GROUND = 8
 
 # Debug: draw the active game camera position in screen space (viewport center).
@@ -266,11 +270,11 @@ class LobbyScene(Scene):
             LOBBY_ROOM_PANEL_WIDTH,
             max(72, sky_floor - m),
         )
-        self.font_title = get_font(44)
         self.font_body = get_font(26)
+        self.font_welcome = get_font(36)
         self.font_room = get_font(22)
         self.font_panel_title = get_font(26, bold=True)
-        self.font_subtitle = get_font(22)
+        self.font_subtitle = get_font(28)
         self.font_empty = get_font(20)
         self._hovered_room_idx: int | None = None
         self._decor = LobbyDecor(
@@ -290,27 +294,30 @@ class LobbyScene(Scene):
 
         icons = build_lobby_icons()
         sz = LOBBY_ICON_BTN_SIZE
-        btn_y = sky_floor - sz
-        bx = LOBBY_LEFT_MARGIN
-        step = sz + LOBBY_ICON_BTN_GAP
+        header_btn_kw = {"show_border": False}
         self.button_refresh = IconButton(
-            rect=(bx, btn_y, sz, sz),
+            rect=(0, 0, LOBBY_ROOM_HEADER_BTN_SIZE, LOBBY_ROOM_HEADER_BTN_SIZE),
             icon=icons["refresh"],
             callback=self.request_rooms,
             tooltip="Refresh",
+            **header_btn_kw,
         )
         self.button_create = IconButton(
-            rect=(bx + step, btn_y, sz, sz),
+            rect=(0, 0, LOBBY_ROOM_HEADER_BTN_SIZE, LOBBY_ROOM_HEADER_BTN_SIZE),
             icon=icons["create"],
             callback=self.create_room,
             tooltip="Create Room",
+            **header_btn_kw,
         )
+        self._layout_panel_header_buttons()
         self.button_leave = IconButton(
-            rect=(bx + step * 2, btn_y, sz, sz),
+            rect=(0, 0, sz, sz),
             icon=icons["logout"],
             callback=self.exit_to_login,
             tooltip="Log Out",
+            show_border=False,
         )
+        self._layout_logout_button()
         self.button_cancel = Button(
             rect=(windowSize[0] // 2 - 90, windowSize[1] // 2 + 60, 180, 48),
             text="Cancel",
@@ -318,6 +325,37 @@ class LobbyScene(Scene):
         )
         self.overlay_font = get_font(32)
         self.network.request_room_list()
+
+    def _room_panel_inner(self) -> pygame.Rect:
+        return self._room_panel_rect.inflate(
+            -LOBBY_ROOM_PANEL_PADDING * 2, -LOBBY_ROOM_PANEL_PADDING * 2
+        )
+
+    def _header_row_metrics(self) -> tuple[pygame.Rect, int, int]:
+        inner = self._room_panel_inner()
+        header = self.font_panel_title.render("Rooms", True, LOBBY_NAME_COLOR)
+        row_h = max(header.get_height(), LOBBY_ROOM_HEADER_BTN_SIZE) + 4
+        row_cy = inner.y + row_h // 2
+        return inner, row_h, row_cy
+
+    def _layout_logout_button(self) -> None:
+        panel = self._room_panel_rect
+        _, _, row_cy = self._header_row_metrics()
+        sz = LOBBY_ICON_BTN_SIZE
+        gap = 8
+        self.button_leave.rect = pygame.Rect(0, 0, sz, sz)
+        self.button_leave.rect.centery = row_cy
+        self.button_leave.rect.right = panel.left - gap
+
+    def _layout_panel_header_buttons(self) -> None:
+        inner, row_h, row_cy = self._header_row_metrics()
+        btn = LOBBY_ROOM_HEADER_BTN_SIZE
+        gap = LOBBY_ROOM_HEADER_BTN_GAP
+        y = row_cy - btn // 2
+        self.button_refresh.rect = pygame.Rect(inner.right - btn, y, btn, btn)
+        self.button_create.rect = pygame.Rect(
+            inner.right - btn * 2 - gap, y, btn, btn
+        )
 
     def exit_to_login(self):
         try:
@@ -433,11 +471,18 @@ class LobbyScene(Scene):
         panel = self._room_panel_rect
         pygame.draw.rect(self.screen, (30, 30, 30), panel, width=3, border_radius=4)
 
-        inner = panel.inflate(-LOBBY_ROOM_PANEL_PADDING * 2, -LOBBY_ROOM_PANEL_PADDING * 2)
+        inner = self._room_panel_inner()
         header = self.font_panel_title.render("Rooms", True, LOBBY_NAME_COLOR)
-        self.screen.blit(header, (inner.x, inner.y))
+        row_h = max(header.get_height(), LOBBY_ROOM_HEADER_BTN_SIZE) + 4
+        self.screen.blit(
+            header,
+            (inner.x + 10, inner.y + (row_h - header.get_height()) // 2),
+        )
+        self._layout_panel_header_buttons()
+        self.button_create.draw(self.screen)
+        self.button_refresh.draw(self.screen)
 
-        list_top = inner.y + header.get_height() + 10
+        list_top = inner.y + row_h + 10
         list_bottom = inner.bottom
         row_step = LOBBY_ROOM_ROW_HEIGHT + LOBBY_ROOM_ROW_GAP
         max_rows = max(0, (list_bottom - list_top) // row_step)
@@ -470,43 +515,36 @@ class LobbyScene(Scene):
             room.pop("__rect", None)
 
     def _blit_room_row(self, rect: pygame.Rect, room: dict) -> None:
+        pad = 10
         room_id = room.get("room_id", "???")
+        room_surf = self.font_room.render(f"Room {room_id}", True, (70, 70, 70))
         players = room.get("players", [])
-        prefix = f"Room {room_id} | "
-        prefix_surf = self.font_room.render(prefix, True, (70, 70, 70))
         if players:
             names_text = ", ".join(players)
         else:
             names_text = "(empty)"
         names_surf = self.font_room.render(names_text, True, LOBBY_NAME_COLOR)
-        y = rect.y + (rect.height - prefix_surf.get_height()) // 2
-        x = rect.x + 10
-        self.screen.blit(prefix_surf, (x, y))
-        self.screen.blit(names_surf, (x + prefix_surf.get_width(), y))
+        y = rect.y + (rect.height - room_surf.get_height()) // 2
+        self.screen.blit(room_surf, (rect.x + pad, y))
+        names_rect = names_surf.get_rect(right=rect.right - pad, centery=rect.centery)
+        self.screen.blit(names_surf, names_rect)
 
     def draw(self):
-        draw_sky_ground_background(self.screen, self._sprites.spriteCollection)
-        self._decor.draw(self.screen)
-        self._decor.draw_divider(
-            self.screen,
-            LOBBY_ROOM_PANEL_MARGIN,
-            self._ground_rect.top - LOBBY_UI_GAP_ABOVE_GROUND,
-        )
+        sprites = self._sprites.spriteCollection
+        draw_sky_tiles(self.screen, sprites)
+        self._decor.draw_clouds(self.screen)
+        draw_ground_tiles(self.screen, sprites)
+        self._decor.draw_foreground(self.screen)
 
         welcome = f"Welcome, {self.username}"
-        shadow = self.font_title.render(welcome, True, (255, 255, 255))
-        title = self.font_title.render(welcome, True, LOBBY_NAME_COLOR)
-        tx, ty = LOBBY_LEFT_MARGIN, 36
-        self.screen.blit(shadow, (tx + 2, ty + 2))
+        tx, ty = LOBBY_LEFT_MARGIN, 40
+        title = self.font_welcome.render(welcome, True, LOBBY_NAME_COLOR)
         self.screen.blit(title, (tx, ty))
         subtitle = self.font_subtitle.render("Multiplayer Lobby", True, (30, 90, 140))
         self.screen.blit(subtitle, (tx, ty + title.get_height() + 4))
 
-        self.button_refresh.draw(self.screen)
-        self.button_create.draw(self.screen)
-        self.button_leave.draw(self.screen)
-
         self._draw_room_panel()
+        self.button_leave.draw(self.screen)
 
         if self.waiting:
             overlay = pygame.Surface(windowSize, pygame.SRCALPHA)

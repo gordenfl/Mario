@@ -13,43 +13,16 @@ from ui.sky_background import LoginDriftingClouds
 _RUN_FRAMES = ("mario_run1", "mario_run2", "mario_run3")
 _RUN_FRAME_MS = 90
 _WALK_SPEED = 2.8
-_EDGE_PAD = 8
-_JUMP_IMPULSE = -9.2
-_JUMP_GRAVITY = 0.44
-_JUMP_COOLDOWN_MS = (900, 2200)
-_PIPE_BODY_ROWS = 2
+_JUMP_GRAVITY = 0.42
+_SPOT_JUMP = -6.8
+_ARRIVE_DIST = 8
+_SPOT_STAY_MS = (2800, 4500)
+_LOOK_AROUND_MS = 1100
+_SPOT_JUMP_CHANCE = 0.03
+_TURN_BACK_CHANCE = 0.02
 _BUSH_NAMES = ("bush_1", "bush_2", "bush_3")
 _BUSH_GROUP_W = 96
-_BUSH_STEP = 80
-
-
-class _LobbyPipe:
-    """Two-tile-wide pipe; extra body rows make it taller above the ground."""
-
-    def __init__(self, sprites, x_left: int, ground_top: int, *, body_rows: int = _PIPE_BODY_ROWS):
-        self.x_left = x_left
-        self.ground_top = ground_top
-        self.parts: List[Tuple[pygame.Surface, int, int]] = []
-        th = 32
-        body_l = _sprite_image(sprites, "pipe2L")
-        body_r = _sprite_image(sprites, "pipe2R")
-        head_l = _sprite_image(sprites, "pipeL")
-        head_r = _sprite_image(sprites, "pipeR")
-        if not all((body_l, body_r, head_l, head_r)):
-            self.rect = pygame.Rect(x_left, ground_top - th, 64, th)
-            return
-        for row in range(body_rows):
-            y = ground_top - (row + 1) * th
-            self.parts.append((body_l, x_left, y))
-            self.parts.append((body_r, x_left + th, y))
-        head_y = ground_top - (body_rows + 1) * th
-        self.parts.append((head_l, x_left, head_y))
-        self.parts.append((head_r, x_left + th, head_y))
-        self.rect = pygame.Rect(x_left, head_y, th * 2, ground_top - head_y)
-
-    def draw(self, surface: pygame.Surface) -> None:
-        for img, x, y in self.parts:
-            surface.blit(img, (x, y))
+_BUSH_COUNT_DIVISOR = 128
 
 
 def _sprite_image(sprites, name: str) -> Optional[pygame.Surface]:
@@ -58,21 +31,18 @@ def _sprite_image(sprites, name: str) -> Optional[pygame.Surface]:
 
 
 class _LobbyPatrolMario:
-    """Walks the lobby ground, jumps over the pipe, turns at edges."""
+    """Walks to random ground spots, hops once, then looks left and right."""
 
     def __init__(
         self,
         sprites,
         ground_top: int,
-        pipe: _LobbyPipe,
         min_x: int,
         max_x: int,
         *,
         rng: Optional[random.Random] = None,
     ):
-        self._sprites = sprites
         self._ground_top = ground_top
-        self._pipe = pipe
         self._rng = rng or random.Random()
         self._run_images = [
             im for im in (_sprite_image(sprites, n) for n in _RUN_FRAMES) if im
@@ -90,69 +60,104 @@ class _LobbyPatrolMario:
 
         self.x = self._min_x
         self.heading = 1
+        self._state = "walk"
+        self._target_x = self._min_x
         self._run_index = 0
         self._run_timer = 0
         self._jump_offset = 0.0
         self._jump_vel = 0.0
-        self._jumping = False
-        self._jump_cooldown_ms = 0
+        self._look_ms = 0
+        self._look_flip_ms = 0
+        self._walk_heading = 1
+        self._pick_target()
 
-    def _feet_rect(self) -> pygame.Rect:
-        y = self._ground_top - self._h + int(self._jump_offset)
-        return pygame.Rect(int(self.x), y, self._w, self._h)
+    def _pick_target(self) -> None:
+        self._target_x = self._rng.uniform(self._min_x, self._max_x)
 
-    def _start_jump(self) -> None:
-        if self._jumping:
+    def _pick_target_after_look(self) -> None:
+        """After looking around, sometimes walk back the way Mario came from."""
+        if self._rng.random() < _TURN_BACK_CHANCE:
+            gap = 24.0
+            if self._walk_heading > 0:
+                high = max(self._min_x, self.x - gap)
+                if high > self._min_x + _ARRIVE_DIST:
+                    self._target_x = self._rng.uniform(self._min_x, high)
+                    return
+            else:
+                low = min(self._max_x, self.x + gap)
+                if low < self._max_x - _ARRIVE_DIST:
+                    self._target_x = self._rng.uniform(low, self._max_x)
+                    return
+        self._pick_target()
+
+    def _draw_y(self) -> int:
+        return self._ground_top - self._h + int(self._jump_offset)
+
+    def _start_spot_jump(self) -> None:
+        self._state = "air"
+        self._jump_vel = _SPOT_JUMP
+        self._jump_offset = 0.0
+
+    def _begin_look_around(self) -> None:
+        self._state = "look"
+        self._look_ms = self._rng.randint(*_SPOT_STAY_MS)
+        self._look_flip_ms = _LOOK_AROUND_MS
+        self._walk_heading = self.heading
+
+    def _arrive_at_spot(self) -> None:
+        if self._rng.random() < _SPOT_JUMP_CHANCE:
+            self._start_spot_jump()
+        else:
+            self._begin_look_around()
+
+    def _update_walk(self, dt_ms: int, dt: float) -> None:
+        if abs(self.x - self._target_x) <= _ARRIVE_DIST:
+            self._arrive_at_spot()
             return
-        self._jumping = True
-        self._jump_vel = _JUMP_IMPULSE
-        self._jump_cooldown_ms = self._rng.randint(*_JUMP_COOLDOWN_MS)
 
-    def _needs_pipe_jump(self) -> bool:
-        if self._jumping or self._jump_cooldown_ms > 0:
-            return False
-        feet = self._feet_rect()
-        pipe = self._pipe.rect
-        if not pipe.width:
-            return False
-        ahead = pipe.inflate(14, 0)
-        if self.heading > 0:
-            return feet.colliderect(ahead) and feet.right >= pipe.left - 6
-        return feet.colliderect(ahead) and feet.left <= pipe.right + 6
+        step = _WALK_SPEED * 60.0 * dt
+        self.heading = 1 if self._target_x > self.x else -1
+        self._walk_heading = self.heading
+        self.x += self.heading * step
+        self.x = max(self._min_x, min(self.x, self._max_x))
+
+        self._run_timer += dt_ms
+        if self._run_timer >= _RUN_FRAME_MS:
+            self._run_timer = 0
+            self._run_index = (self._run_index + 1) % len(self._run_images)
+
+    def _update_air(self, dt: float) -> None:
+        self._jump_vel += _JUMP_GRAVITY * 60.0 * dt
+        self._jump_offset += self._jump_vel * 60.0 * dt
+        if self._jump_offset >= 0.0:
+            self._jump_offset = 0.0
+            self._jump_vel = 0.0
+            self._begin_look_around()
+
+    def _update_look(self, dt_ms: int) -> None:
+        self._look_ms -= dt_ms
+        self._look_flip_ms -= dt_ms
+        if self._look_flip_ms <= 0:
+            self.heading *= -1
+            self._look_flip_ms = _LOOK_AROUND_MS
+        if self._look_ms <= 0:
+            self._pick_target_after_look()
+            self._state = "walk"
 
     def update(self, dt_ms: int) -> None:
-        dt = max(0, dt_ms) / 1000.0
-        step = _WALK_SPEED * 60.0 * dt
-
-        if self._jumping:
-            self._jump_vel += _JUMP_GRAVITY * 60.0 * dt
-            self._jump_offset += self._jump_vel * 60.0 * dt
-            if self._jump_offset >= 0.0:
-                self._jump_offset = 0.0
-                self._jump_vel = 0.0
-                self._jumping = False
+        dt = max(0.0, dt_ms) / 1000.0
+        if self._state == "air":
+            self._update_air(dt)
+        elif self._state == "look":
+            self._update_look(dt_ms)
         else:
-            self._jump_cooldown_ms = max(0, self._jump_cooldown_ms - dt_ms)
-            if self._needs_pipe_jump():
-                self._start_jump()
-
-        self.x += self.heading * step
-        if self.x <= self._min_x:
-            self.x = self._min_x
-            self.heading = 1
-        elif self.x >= self._max_x:
-            self.x = self._max_x
-            self.heading = -1
-
-        if not self._jumping and self._run_images:
-            self._run_timer += dt_ms
-            if self._run_timer >= _RUN_FRAME_MS:
-                self._run_timer = 0
-                self._run_index = (self._run_index + 1) % len(self._run_images)
+            self._update_walk(dt_ms, dt)
 
     def draw(self, surface: pygame.Surface) -> None:
-        if self._jumping and self._jump:
+        if self._state == "air" and self._jump:
             image = self._jump
+        elif self._state == "look" and self._idle:
+            image = self._idle
         elif self._run_images:
             image = self._run_images[self._run_index]
         elif self._idle:
@@ -161,8 +166,7 @@ class _LobbyPatrolMario:
             return
         if self.heading < 0:
             image = flip(image, True, False)
-        y = self._ground_top - self._h + int(self._jump_offset)
-        surface.blit(image, (int(self.x), y))
+        surface.blit(image, (int(self.x), self._draw_y()))
 
 
 class LobbyDecor:
@@ -184,14 +188,11 @@ class LobbyDecor:
 
         patrol_min = 24
         patrol_max = panel_left - 72
-        pipe_x = patrol_min + (patrol_max - patrol_min) // 2 - 32
-        self._pipe = _LobbyPipe(sprites, pipe_x, ground_top, body_rows=_PIPE_BODY_ROWS)
         self._bushes: List[Tuple[pygame.Surface, int, int]] = []
         self._build_bushes()
         self._mario = _LobbyPatrolMario(
             sprites,
             ground_top,
-            self._pipe,
             patrol_min,
             patrol_max,
             rng=self._rng,
@@ -203,25 +204,41 @@ class LobbyDecor:
         if not all(images):
             return
         group_h = max(im.get_height() for im in images)
-        pipe_zone = self._pipe.rect.inflate(24, 8)
-        x = 16
-        while x + _BUSH_GROUP_W <= self._panel_left - 24:
-            group_rect = pygame.Rect(x, self._ground_top - group_h, _BUSH_GROUP_W, group_h)
-            if not group_rect.colliderect(pipe_zone):
-                for i, img in enumerate(images):
-                    self._bushes.append((img, x + i * 32, self._ground_top - img.get_height()))
-            x += _BUSH_STEP
+        min_x = 16
+        max_x = self._panel_left - _BUSH_GROUP_W - 24
+        if max_x <= min_x:
+            return
+
+        target = max(1, (max_x - min_x) // _BUSH_COUNT_DIVISOR)
+        placed: List[pygame.Rect] = []
+        attempts = 0
+        while len(placed) < target and attempts < target * 24:
+            attempts += 1
+            x = self._rng.randint(min_x, max_x)
+            rect = pygame.Rect(x, self._ground_top - group_h, _BUSH_GROUP_W, group_h)
+            if any(rect.colliderect(other.inflate(12, 0)) for other in placed):
+                continue
+            placed.append(rect)
+            for i, img in enumerate(images):
+                self._bushes.append(
+                    (img, x + i * 32, self._ground_top - img.get_height())
+                )
 
     def update(self, dt_ms: int) -> None:
         self._clouds.update(dt_ms)
         self._mario.update(dt_ms)
 
-    def draw(self, surface: pygame.Surface) -> None:
+    def draw_clouds(self, surface: pygame.Surface) -> None:
         self._clouds.draw(surface, self._sprites)
+
+    def draw_foreground(self, surface: pygame.Surface) -> None:
         for img, x, y in self._bushes:
             surface.blit(img, (x, y))
-        self._pipe.draw(surface)
         self._mario.draw(surface)
+
+    def draw(self, surface: pygame.Surface) -> None:
+        self.draw_clouds(surface)
+        self.draw_foreground(surface)
 
     def draw_divider(self, surface: pygame.Surface, top: int, bottom: int) -> None:
         x = self._panel_left - 18

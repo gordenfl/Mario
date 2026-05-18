@@ -117,20 +117,32 @@ def ground_band_rect(screen_w: int, screen_h: int, sprites, *, ground_rows: int 
     return pygame.Rect(0, screen_h - band_h, screen_w, band_h)
 
 
-def draw_sky_ground_background(
+def draw_sky_tiles(surface: pygame.Surface, sprites) -> None:
+    """Tiled sky only (no clouds or ground)."""
+    sky = sprites.get("sky")
+    if not sky or not sky.image:
+        surface.fill((137, 207, 240))
+        return
+    sky_img = sky.image
+    tw, th = sky_img.get_size()
+    width, height = surface.get_size()
+    for y in range(0, height, th):
+        for x in range(0, width, tw):
+            surface.blit(sky_img, (x, y))
+
+
+def draw_ground_tiles(
     surface: pygame.Surface,
     sprites,
     *,
     ground_rows: int = DEFAULT_GROUND_ROWS,
 ) -> None:
-    """Full-screen sky with game ground tiles along the bottom (like the menu)."""
+    """Ground tile band along the bottom (like the menu)."""
     width, height = surface.get_size()
     sky_sprite = sprites.get("sky")
     ground_sprite = sprites.get("ground")
     if not sky_sprite or not sky_sprite.image:
-        surface.fill((137, 207, 240))
         return
-
     sky_img = sky_sprite.image
     ground_img = (
         ground_sprite.image
@@ -140,16 +152,6 @@ def draw_sky_ground_background(
     tw = sky_img.get_width()
     th = sky_img.get_height()
     ground_band = th * ground_rows
-    sky_limit = max(0, height - ground_band)
-
-    y = 0
-    while y < sky_limit:
-        x = 0
-        while x < width:
-            surface.blit(sky_img, (x, y))
-            x += tw
-        y += th
-
     gy = height - ground_band
     while gy < height:
         x = 0
@@ -157,6 +159,17 @@ def draw_sky_ground_background(
             surface.blit(ground_img, (x, gy))
             x += tw
         gy += th
+
+
+def draw_sky_ground_background(
+    surface: pygame.Surface,
+    sprites,
+    *,
+    ground_rows: int = DEFAULT_GROUND_ROWS,
+) -> None:
+    """Full-screen sky with game ground tiles along the bottom (like the menu)."""
+    draw_sky_tiles(surface, sprites)
+    draw_ground_tiles(surface, sprites, ground_rows=ground_rows)
 
 
 def draw_login_sky(

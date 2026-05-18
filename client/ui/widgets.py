@@ -56,6 +56,7 @@ class IconButton:
         disabled_color=(120, 120, 130),
         tooltip_color=(0, 0, 0),
         font=None,
+        show_border: bool = True,
     ):
         self.rect = pygame.Rect(rect)
         self.icon = icon
@@ -66,6 +67,7 @@ class IconButton:
         self.disabled_color = disabled_color
         self.tooltip_color = tooltip_color
         self.font = font or get_font(18)
+        self.show_border = show_border
         self.hovered = False
         self.disabled = False
 
@@ -90,7 +92,8 @@ class IconButton:
         else:
             fill = self.base_color
         pygame.draw.rect(surface, fill, self.rect, border_radius=8)
-        pygame.draw.rect(surface, (20, 20, 20), self.rect, width=2, border_radius=8)
+        if self.show_border:
+            pygame.draw.rect(surface, (20, 20, 20), self.rect, width=2, border_radius=8)
 
         icon = self.icon
         scale = min(
