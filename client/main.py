@@ -26,7 +26,12 @@ from network.protocol import (
     PROJECTILE_FLAG_DESPAWN,
     ACTION_FIRE,
 )
-from ui.sky_background import LoginDriftingClouds, draw_login_sky
+from ui.sky_background import (
+    LoginDriftingClouds,
+    draw_login_sky,
+    draw_sky_ground_background,
+    ground_band_rect,
+)
 from ui.login_frame_mushrooms import LoginFrameMushrooms
 from ui.login_wall_mario import LoginWallMario
 from ui.wall_title import (
@@ -34,11 +39,23 @@ from ui.wall_title import (
     draw_login_title_text,
     draw_wall_frame_bricks,
 )
-from ui.widgets import Button, TextInput, get_font
+from ui.lobby_icons import build_lobby_icons
+from ui.widgets import Button, IconButton, TextInput, get_font
 from viewport import compute_virtual_framebuffer, default_window_size
 
 
 windowSize = default_window_size()
+
+LOBBY_LEFT_MARGIN = 40
+LOBBY_ROOM_PANEL_WIDTH = 340
+LOBBY_ROOM_PANEL_MARGIN = 14
+LOBBY_ROOM_PANEL_PADDING = 14
+LOBBY_ROOM_ROW_HEIGHT = 48
+LOBBY_ROOM_ROW_GAP = 8
+LOBBY_NAME_COLOR = (0, 0, 0)
+LOBBY_ICON_BTN_SIZE = 52
+LOBBY_ICON_BTN_GAP = 16
+LOBBY_UI_GAP_ABOVE_GROUND = 8
 
 # Debug: draw the active game camera position in screen space (viewport center).
 DEBUG_DRAW_GAME_CAMERA_POSITION = True
@@ -53,7 +70,7 @@ class _GameBgmToggle:
         bw, bh = 104, 30
         self.button = Button(
             (screen_width - bw - 8, 8, bw, bh),
-            "关音乐" if self.on else "开音乐",
+            "Music Off" if self.on else "Music On",
             self._toggle,
             font=get_font(20),
         )
@@ -62,16 +79,16 @@ class _GameBgmToggle:
         if self.on:
             self.sound.music_channel.stop()
             self.on = False
-            self.button.text = "开音乐"
+            self.button.text = "Music On"
         else:
             self.sound.music_channel.play(self.sound.soundtrack, loops=-1)
             self.on = True
-            self.button.text = "关音乐"
+            self.button.text = "Music Off"
 
     def mark_stopped_externally(self):
         """Game over / leave: channel was stopped outside this control."""
         self.on = False
-        self.button.text = "开音乐"
+        self.button.text = "Music On"
 
     def handle_event(self, event):
         self.button.handle_event(event)
@@ -188,7 +205,7 @@ class LoginScene(Scene):
             self.in_progress = True
             self.message = "正在连接服务器..."
             login_response = self.network.connect(username)
-            self.message = "登录成功，正在进入大厅..."
+            self.message = "Login successful, entering lobby..."
             self.next_scene = "lobby"
             self.payload = {"username": login_response["username"]}
         except (NetworkError, OSError) as exc:
@@ -235,35 +252,56 @@ class LobbyScene(Scene):
     def __init__(self, screen, network: NetworkClient, username: str):
         super().__init__(screen, network)
         self.username = username
+        self._sprites = Sprites()
+        sw, sh = windowSize
+        sprites = self._sprites.spriteCollection
+        ground = ground_band_rect(sw, sh, sprites)
+        sky_floor = ground.top - LOBBY_UI_GAP_ABOVE_GROUND
+        m = LOBBY_ROOM_PANEL_MARGIN
+        self._room_panel_rect = pygame.Rect(
+            sw - LOBBY_ROOM_PANEL_WIDTH - m,
+            m,
+            LOBBY_ROOM_PANEL_WIDTH,
+            max(72, sky_floor - m),
+        )
         self.font_title = get_font(44)
         self.font_body = get_font(26)
-        self.font_room = get_font(24)
+        self.font_room = get_font(22)
+        self.font_panel_title = get_font(26, bold=True)
         self.rooms = []
-        self.message = "刷新房间列表中..."
+        self.message = ""
         self.waiting = False
         self.waiting_room_id = None
         self.pending_join = None
         self.last_refresh_time = 0
         self.refresh_interval_ms = 5000
 
-        self.button_refresh = Button(
-            rect=(60, 400, 140, 44),
-            text="刷新",
+        icons = build_lobby_icons()
+        sz = LOBBY_ICON_BTN_SIZE
+        btn_y = sky_floor - sz
+        bx = LOBBY_LEFT_MARGIN
+        step = sz + LOBBY_ICON_BTN_GAP
+        self.button_refresh = IconButton(
+            rect=(bx, btn_y, sz, sz),
+            icon=icons["refresh"],
             callback=self.request_rooms,
+            tooltip="Refresh",
         )
-        self.button_create = Button(
-            rect=(240, 400, 140, 44),
-            text="创建房间",
+        self.button_create = IconButton(
+            rect=(bx + step, btn_y, sz, sz),
+            icon=icons["create"],
             callback=self.create_room,
+            tooltip="Create Room",
         )
-        self.button_leave = Button(
-            rect=(420, 400, 140, 44),
-            text="退出登录",
+        self.button_leave = IconButton(
+            rect=(bx + step * 2, btn_y, sz, sz),
+            icon=icons["logout"],
             callback=self.exit_to_login,
+            tooltip="Log Out",
         )
         self.button_cancel = Button(
             rect=(windowSize[0] // 2 - 90, windowSize[1] // 2 + 60, 180, 48),
-            text="取消等待",
+            text="Cancel",
             callback=self.cancel_waiting,
         )
         self.overlay_font = get_font(32)
@@ -281,13 +319,13 @@ class LobbyScene(Scene):
         if self.waiting:
             return
         self.network.request_room_list()
-        self.message = "刷新房间列表中..."
+        self.message = ""
 
     def create_room(self):
         if self.waiting:
             return
         self.waiting = True
-        self.message = "正在创建房间..."
+        self.message = "Creating room..."
         self.network.request_create_room()
 
     def cancel_waiting(self):
@@ -299,7 +337,7 @@ class LobbyScene(Scene):
             pass
         self.waiting = False
         self.waiting_room_id = None
-        self.message = "已取消等待，刷新房间列表中..."
+        self.message = "Wait cancelled, refreshing room list..."
         self.network.request_room_list()
 
     def handle_events(self, events):
@@ -315,7 +353,7 @@ class LobbyScene(Scene):
                     if clicked_room:
                         self.pending_join = clicked_room
                         self.waiting = True
-                        self.message = f"正在加入房间 {clicked_room}..."
+                        self.message = f"Joining room {clicked_room}..."
                         self.network.request_join_room(clicked_room)
 
     def update(self, dt_ms):
@@ -338,19 +376,19 @@ class LobbyScene(Scene):
             msg_type = message.get("type")
             if msg_type == "rooms":
                 self.rooms = message.get("rooms", [])
-                self.message = f"当前可加入房间：{len(self.rooms)} 个"
+                self.message = ""
                 self.last_refresh_time = 0
             elif msg_type == "room_created":
                 self.waiting = True
                 self.waiting_room_id = message.get("room_id")
-                self.message = f"房间 {self.waiting_room_id} 已创建，等待另一名玩家..."
+                self.message = f"Room {self.waiting_room_id} created, waiting for another player..."
             elif msg_type == "room_joined":
                 self.waiting = True
                 self.waiting_room_id = message.get("room_id")
-                self.message = f"已进入房间 {self.waiting_room_id}，等待另一名玩家..."
+                self.message = f"Joined room {self.waiting_room_id}, waiting for another player..."
             elif msg_type == "room_waiting":
                 players = ", ".join(message.get("players", []))
-                self.message = f"玩家列表：{players}，等待中..."
+                self.message = f"Players: {players}, waiting..."
             elif msg_type == "room_ready":
                 self.next_scene = "game"
                 self.payload = {
@@ -360,10 +398,10 @@ class LobbyScene(Scene):
             elif msg_type == "room_peer_left":
                 self.waiting = False
                 self.waiting_room_id = None
-                self.message = "对方离开了房间，您已退出等待状态。"
+                self.message = "Opponent left the room; wait cancelled."
                 self.network.request_room_list()
             elif msg_type == "error":
-                self.message = message.get("message", "发生错误")
+                self.message = message.get("message", "An error occurred")
                 self.waiting = False
                 self.waiting_room_id = None
                 self.network.request_room_list()
@@ -371,51 +409,67 @@ class LobbyScene(Scene):
                 # ignore in lobby
                 pass
 
+    def _draw_room_panel(self) -> None:
+        panel = self._room_panel_rect
+        pygame.draw.rect(self.screen, (30, 30, 30), panel, width=3, border_radius=4)
+
+        inner = panel.inflate(-LOBBY_ROOM_PANEL_PADDING * 2, -LOBBY_ROOM_PANEL_PADDING * 2)
+        header = self.font_panel_title.render("Rooms", True, LOBBY_NAME_COLOR)
+        self.screen.blit(header, (inner.x, inner.y))
+
+        list_top = inner.y + header.get_height() + 10
+        list_bottom = inner.bottom
+        row_step = LOBBY_ROOM_ROW_HEIGHT + LOBBY_ROOM_ROW_GAP
+        max_rows = max(0, (list_bottom - list_top) // row_step)
+
+        for idx, room in enumerate(self.rooms[:max_rows]):
+            rect = pygame.Rect(
+                inner.x,
+                list_top + idx * row_step,
+                inner.width,
+                LOBBY_ROOM_ROW_HEIGHT,
+            )
+            pygame.draw.rect(self.screen, (90, 90, 90), rect, width=1, border_radius=4)
+            self._blit_room_row(rect, room)
+            room["__rect"] = rect
+
+        for room in self.rooms[max_rows:]:
+            room.pop("__rect", None)
+
+    def _blit_room_row(self, rect: pygame.Rect, room: dict) -> None:
+        room_id = room.get("room_id", "???")
+        players = room.get("players", [])
+        prefix = f"Room {room_id} | "
+        prefix_surf = self.font_room.render(prefix, True, (70, 70, 70))
+        if players:
+            names_text = ", ".join(players)
+        else:
+            names_text = "(empty)"
+        names_surf = self.font_room.render(names_text, True, LOBBY_NAME_COLOR)
+        y = rect.y + (rect.height - prefix_surf.get_height()) // 2
+        x = rect.x + 10
+        self.screen.blit(prefix_surf, (x, y))
+        self.screen.blit(names_surf, (x + prefix_surf.get_width(), y))
+
     def draw(self):
-        self.screen.fill((28, 30, 40))
+        draw_sky_ground_background(self.screen, self._sprites.spriteCollection)
         title = self.font_title.render(
-            f"欢迎，{self.username}", True, (255, 255, 255)
+            f"Welcome, {self.username}", True, LOBBY_NAME_COLOR
         )
-        self.screen.blit(title, (50, 40))
-        info = self.font_body.render(
-            "点击房间加入，或创建新房间。", True, (180, 180, 200)
-        )
-        self.screen.blit(info, (50, 90))
-        message = self.font_body.render(self.message, True, (200, 200, 120))
-        self.screen.blit(message, (50, 130))
+        self.screen.blit(title, (LOBBY_LEFT_MARGIN, 40))
 
         self.button_refresh.draw(self.screen)
         self.button_create.draw(self.screen)
         self.button_leave.draw(self.screen)
 
-        list_top = 180
-        list_left = 60
-        item_height = 48
-        item_width = windowSize[0] - 120
-        for idx, room in enumerate(self.rooms[:6]):
-            rect = pygame.Rect(
-                list_left, list_top + idx * (item_height + 10), item_width, item_height
-            )
-            pygame.draw.rect(
-                self.screen, (50, 60, 90), rect, border_radius=6
-            )
-            pygame.draw.rect(
-                self.screen, (70, 80, 110), rect, width=2, border_radius=6
-            )
-            room_id = room.get("room_id", "???")
-            players = ", ".join(room.get("players", [])) or "(空)"
-            label = self.font_room.render(
-                f"房间 {room_id} | 玩家: {players}", True, (230, 230, 240)
-            )
-            self.screen.blit(label, (rect.x + 16, rect.y + 12))
-            room["__rect"] = rect
+        self._draw_room_panel()
 
         if self.waiting:
             overlay = pygame.Surface(windowSize, pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 160))
             self.screen.blit(overlay, (0, 0))
             text = self.overlay_font.render(
-                self.message or "等待另一名玩家加入...", True, (255, 255, 255)
+                self.message or "Waiting for another player...", True, (255, 255, 255)
             )
             self.screen.blit(
                 text, text.get_rect(center=(windowSize[0] // 2, windowSize[1] // 2))
@@ -922,8 +976,8 @@ def run_game(screen, network: NetworkClient, username: str, room_ready_msg: dict
                     overlay.fill((0, 0, 0, 180))
                     screen.blit(overlay, (0, 0))
                     font = get_font(42)
-                    winner = game_over_info.get("winner", "玩家")
-                    text = f"{winner} 获胜！"
+                    winner = game_over_info.get("winner", "Player")
+                    text = f"{winner} wins!"
                     label = font.render(text, True, (255, 255, 255))
                     screen.blit(label, label.get_rect(center=(windowSize[0] // 2, windowSize[1] // 2)))
                     draw_game_camera_position_debug(screen)
@@ -1017,7 +1071,7 @@ def main():
             try:
                 network.connect(payload["username"])
             except (NetworkError, OSError) as exc:
-                print(f"[client] 重新连接服务器失败: {exc}")
+                print(f"[client] Failed to reconnect to server: {exc}")
                 current_scene = LoginScene(screen, network)
                 continue
             current_scene = LobbyScene(screen, network, payload["username"])

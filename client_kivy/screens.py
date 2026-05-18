@@ -253,13 +253,13 @@ class LobbyScreen(Screen):
         self._pc_root = root
 
         self.title_lbl = _pc_label(
-            text="欢迎",
+            text="Welcome",
             font_size=30,
             color=(255, 255, 255),
             halign="left",
         )
         self.hint_lbl = _pc_label(
-            text="点击房间加入，或创建新房间。",
+            text="Click a room to join, or create a new one.",
             font_size=20,
             color=(180, 180, 200),
             halign="left",
@@ -271,9 +271,9 @@ class LobbyScreen(Screen):
             halign="left",
         )
 
-        self.button_refresh = _pc_button("刷新", font_size=20)
-        self.button_create = _pc_button("创建房间", font_size=20)
-        self.button_leave = _pc_button("退出登录", font_size=20)
+        self.button_refresh = _pc_button("Refresh", font_size=20)
+        self.button_create = _pc_button("Create Room", font_size=20)
+        self.button_leave = _pc_button("Log Out", font_size=20)
         self.button_refresh.bind(on_press=lambda *_: self.request_rooms())
         self.button_create.bind(on_press=lambda *_: self.create_room())
         self.button_leave.bind(on_press=lambda *_: self.exit_to_login())
@@ -311,7 +311,7 @@ class LobbyScreen(Screen):
             color=(255, 255, 255),
             halign="center",
         )
-        self.button_cancel = _pc_button("取消等待", font_size=20)
+        self.button_cancel = _pc_button("Cancel", font_size=20)
         self.button_cancel.bind(on_press=lambda *_: self.cancel_waiting())
         ov_box.add_pc_widget(self.overlay_msg, _pc_rect(80, 205, 692, 44))
         ov_box.add_pc_widget(self.button_cancel, _pc_rect(336, 280, 180, 48))
@@ -327,8 +327,8 @@ class LobbyScreen(Screen):
     def attach(self, network: Any, username: str):
         self.network = network
         self.username = username
-        self.title_lbl.text = f"欢迎，{username}"
-        self.message = "加载房间列表..."
+        self.title_lbl.text = f"Welcome, {username}"
+        self.message = "Loading room list..."
         self.msg_lbl.text = self.message
         self.waiting = False
         self.overlay.opacity = 0
@@ -366,23 +366,23 @@ class LobbyScreen(Screen):
         msg_type = message.get("type")
         if msg_type == "rooms":
             self.rooms = message.get("rooms", [])
-            self.message = f"当前可加入房间：{len(self.rooms)} 个"
+            self.message = f"{len(self.rooms)} room(s) available"
             self.msg_lbl.text = self.message
             self._refresh_ms = 0.0
             self._rebuild_room_buttons()
         elif msg_type == "room_created":
             self.waiting = True
             self.waiting_room_id = message.get("room_id")
-            self.message = f"房间 {self.waiting_room_id} 已创建，等待另一名玩家..."
+            self.message = f"Room {self.waiting_room_id} created, waiting for another player..."
             self._sync_waiting_ui()
         elif msg_type == "room_joined":
             self.waiting = True
             self.waiting_room_id = message.get("room_id")
-            self.message = f"已进入房间 {self.waiting_room_id}，等待另一名玩家..."
+            self.message = f"Joined room {self.waiting_room_id}, waiting for another player..."
             self._sync_waiting_ui()
         elif msg_type == "room_waiting":
             players = ", ".join(message.get("players", []))
-            self.message = f"玩家列表：{players}，等待中..."
+            self.message = f"Players: {players}, waiting..."
             self._sync_waiting_ui()
         elif msg_type == "room_ready":
             game = self.manager.get_screen("game")
@@ -395,19 +395,19 @@ class LobbyScreen(Screen):
             # Clear stale list so the room they joined does not stay visible until next fetch.
             self.rooms = []
             self._rebuild_room_buttons()
-            self.message = "对局中…"
+            self.message = "In match…"
             self.msg_lbl.text = self.message
             self.manager.current = "game"
         elif msg_type == "room_peer_left":
             self.waiting = False
             self.waiting_room_id = None
-            self.message = "对方离开了房间。"
+            self.message = "Opponent left the room."
             self.msg_lbl.text = self.message
             self.overlay.opacity = 0
             if self.network:
                 self.network.request_room_list()
         elif msg_type == "error":
-            self.message = message.get("message", "发生错误")
+            self.message = message.get("message", "An error occurred")
             self.msg_lbl.text = self.message
             self.waiting = False
             self.waiting_room_id = None
@@ -417,13 +417,13 @@ class LobbyScreen(Screen):
 
     def _sync_waiting_ui(self):
         self.msg_lbl.text = self.message
-        self.overlay_msg.text = self.message or "等待另一名玩家..."
+        self.overlay_msg.text = self.message or "Waiting for another player..."
         self.overlay.opacity = 1 if self.waiting else 0
 
     def request_rooms(self):
         if self.waiting or not self.network:
             return
-        self.message = "刷新房间列表中..."
+        self.message = "Refreshing room list..."
         self.msg_lbl.text = self.message
         self.network.request_room_list()
 
@@ -431,7 +431,7 @@ class LobbyScreen(Screen):
         if self.waiting or not self.network:
             return
         self.waiting = True
-        self.message = "正在创建房间..."
+        self.message = "Creating room..."
         self._sync_waiting_ui()
         self.network.request_create_room()
 
@@ -445,7 +445,7 @@ class LobbyScreen(Screen):
             pass
         self.waiting = False
         self.waiting_room_id = None
-        self.message = "已取消等待"
+        self.message = "Wait cancelled"
         self.msg_lbl.text = self.message
         self.overlay.opacity = 0
         if self.network:
@@ -477,8 +477,8 @@ class LobbyScreen(Screen):
                 continue
             room = self.rooms[idx]
             rid = room.get("room_id", "?")
-            players = ", ".join(room.get("players", [])) or "(空)"
-            btn.text = f"房间 {rid} | 玩家: {players}"
+            players = ", ".join(room.get("players", [])) or "(empty)"
+            btn.text = f"Room {rid} | Players: {players}"
             btn.opacity = 1
             btn.disabled = False
 
@@ -491,7 +491,7 @@ class LobbyScreen(Screen):
         if self.waiting or not self.network:
             return
         self.waiting = True
-        self.message = f"正在加入房间 {room_id}..."
+        self.message = f"Joining room {room_id}..."
         self._sync_waiting_ui()
         self.network.request_join_room(room_id)
 
@@ -551,7 +551,7 @@ class GameScreen(Screen):
             text_size=(None, None),
             **text_font_kwargs(),
         )
-        btn_wait = Button(text="返回大厅", size_hint_y=None, height=dp(48), **text_font_kwargs())
+        btn_wait = Button(text="Back to Lobby", size_hint_y=None, height=dp(48), **text_font_kwargs())
         btn_wait.bind(on_press=self._on_summary_back_to_lobby)
 
         box.add_widget(self._sum_title)
@@ -575,10 +575,10 @@ class GameScreen(Screen):
         wn = payload.get("winner")
         ls = payload.get("loser")
 
-        winner = wn if isinstance(wn, str) and wn else "玩家"
+        winner = wn if isinstance(wn, str) and wn else "Player"
         if my_name and winner == my_name:
-            winner = f"{winner}（你）"
-        self._sum_title.text = f"{winner} 获胜！"
+            winner = f"{winner} (you)"
+        self._sum_title.text = f"{winner} wins!"
         self._sum_winner.text = ""
         self._sum_loser.text = ""
         self._summary_layer.disabled = False
@@ -594,7 +594,7 @@ class GameScreen(Screen):
         lobby.waiting = False
         lobby.waiting_room_id = None
         lobby.overlay.opacity = 0
-        lobby.message = "请选择房间加入，或创建房间等待对手。"
+        lobby.message = "Join a room or create one and wait for an opponent."
         lobby.msg_lbl.text = lobby.message
         if lobby.network:
             # Leave the match room on the server; otherwise we stay seated and the

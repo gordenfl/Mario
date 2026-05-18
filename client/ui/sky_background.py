@@ -100,6 +100,65 @@ def generate_login_cloud_layout(
     return [(int(c.x), c.y) for c in clouds._clouds]
 
 
+DEFAULT_GROUND_ROWS = 2
+
+
+def ground_tile_height(sprites) -> int:
+    sky_sprite = sprites.get("sky")
+    if sky_sprite and sky_sprite.image:
+        return sky_sprite.image.get_height()
+    return 32
+
+
+def ground_band_rect(screen_w: int, screen_h: int, sprites, *, ground_rows: int = DEFAULT_GROUND_ROWS) -> pygame.Rect:
+    """Screen rect covered by the bottom ground tile rows."""
+    th = ground_tile_height(sprites)
+    band_h = th * ground_rows
+    return pygame.Rect(0, screen_h - band_h, screen_w, band_h)
+
+
+def draw_sky_ground_background(
+    surface: pygame.Surface,
+    sprites,
+    *,
+    ground_rows: int = DEFAULT_GROUND_ROWS,
+) -> None:
+    """Full-screen sky with game ground tiles along the bottom (like the menu)."""
+    width, height = surface.get_size()
+    sky_sprite = sprites.get("sky")
+    ground_sprite = sprites.get("ground")
+    if not sky_sprite or not sky_sprite.image:
+        surface.fill((137, 207, 240))
+        return
+
+    sky_img = sky_sprite.image
+    ground_img = (
+        ground_sprite.image
+        if ground_sprite and ground_sprite.image
+        else sky_img
+    )
+    tw = sky_img.get_width()
+    th = sky_img.get_height()
+    ground_band = th * ground_rows
+    sky_limit = max(0, height - ground_band)
+
+    y = 0
+    while y < sky_limit:
+        x = 0
+        while x < width:
+            surface.blit(sky_img, (x, y))
+            x += tw
+        y += th
+
+    gy = height - ground_band
+    while gy < height:
+        x = 0
+        while x < width:
+            surface.blit(ground_img, (x, gy))
+            x += tw
+        gy += th
+
+
 def draw_login_sky(
     surface: pygame.Surface,
     sprites,

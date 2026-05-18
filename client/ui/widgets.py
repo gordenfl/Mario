@@ -41,6 +41,74 @@ class Button:
         surface.blit(label, label_rect)
 
 
+class IconButton:
+    """Square toolbar button with a drawn icon and optional hover tooltip."""
+
+    def __init__(
+        self,
+        rect,
+        icon: pygame.Surface,
+        callback,
+        *,
+        tooltip: str = "",
+        base_color=(66, 135, 245),
+        hover_color=(45, 110, 210),
+        disabled_color=(120, 120, 130),
+        tooltip_color=(0, 0, 0),
+        font=None,
+    ):
+        self.rect = pygame.Rect(rect)
+        self.icon = icon
+        self.callback = callback
+        self.tooltip = tooltip
+        self.base_color = base_color
+        self.hover_color = hover_color
+        self.disabled_color = disabled_color
+        self.tooltip_color = tooltip_color
+        self.font = font or get_font(18)
+        self.hovered = False
+        self.disabled = False
+
+    def handle_event(self, event):
+        if self.disabled:
+            return
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.rect.collidepoint(event.pos):
+                self.callback()
+
+    def update(self, mouse_pos):
+        if self.disabled:
+            self.hovered = False
+        else:
+            self.hovered = self.rect.collidepoint(mouse_pos)
+
+    def draw(self, surface):
+        if self.disabled:
+            fill = self.disabled_color
+        elif self.hovered:
+            fill = self.hover_color
+        else:
+            fill = self.base_color
+        pygame.draw.rect(surface, fill, self.rect, border_radius=8)
+        pygame.draw.rect(surface, (20, 20, 20), self.rect, width=2, border_radius=8)
+
+        icon = self.icon
+        scale = min(
+            (self.rect.width - 14) / icon.get_width(),
+            (self.rect.height - 14) / icon.get_height(),
+        )
+        iw = max(1, int(icon.get_width() * scale))
+        ih = max(1, int(icon.get_height() * scale))
+        scaled = pygame.transform.smoothscale(icon, (iw, ih))
+        dest = scaled.get_rect(center=self.rect.center)
+        surface.blit(scaled, dest)
+
+        if self.hovered and self.tooltip and not self.disabled:
+            tip = self.font.render(self.tooltip, True, self.tooltip_color)
+            tip_rect = tip.get_rect(midbottom=(self.rect.centerx, self.rect.top - 4))
+            surface.blit(tip, tip_rect)
+
+
 class Label:
     def __init__(self, rect, text, font=None, color=(255, 255, 255)):
         self.rect = pygame.Rect(rect)
