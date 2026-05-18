@@ -20,7 +20,9 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
 from .font_config import text_font_kwargs
+from .sky_bg import paint_login_sky
 from .view import GameView
+from .wall_title import WallFramedTitle
 
 
 def _import_network():
@@ -57,12 +59,15 @@ def _pc_rect(x: float, y_top: float, w: float, h: float):
 class PcLayout(FloatLayout):
     """Fixed 852x480 coordinate layout matching the pygame client screens."""
 
-    def __init__(self, bg=(24, 24, 32), **kw):
+    def __init__(self, bg=(24, 24, 32), sky_bg: bool = False, cloud_layout=None, **kw):
         super().__init__(**kw)
         self._virtual_children = []
-        with self.canvas.before:
-            Color(*_pc_color(bg))
-            self._bg_rect = Rectangle(pos=self.pos, size=self.size)
+        self._sky_bg = sky_bg
+        self._cloud_layout = cloud_layout
+        if not sky_bg:
+            with self.canvas.before:
+                Color(*_pc_color(bg))
+                self._bg_rect = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._relayout, size=self._relayout)
 
     def add_pc_widget(self, widget, rect):
@@ -88,8 +93,20 @@ class PcLayout(FloatLayout):
             widget.text_size = size
 
     def _relayout(self, *_args):
-        self._bg_rect.pos = self.pos
-        self._bg_rect.size = self.size
+        if self._sky_bg:
+            self.canvas.before.clear()
+            if self.width > 0 and self.height > 0:
+                with self.canvas.before:
+                    paint_login_sky(
+                        self.x,
+                        self.y,
+                        self.width,
+                        self.height,
+                        cloud_positions=self._cloud_layout,
+                    )
+        else:
+            self._bg_rect.pos = self.pos
+            self._bg_rect.size = self.size
         for widget in self._virtual_children:
             self._place(widget)
 
@@ -130,22 +147,16 @@ class LoginScreen(Screen):
         self.network: Optional[Any] = None
         self._busy = False
 
-        root = PcLayout(bg=(24, 24, 32))
-        title = _pc_label(
-            text="超级马里奥 - 联机版",
-            font_size=32,
-            color=(255, 255, 255),
-            halign="center",
-        )
-        subtitle = _pc_label(
-            text="请输入用户名登录游戏",
-            font_size=20,
-            color=(180, 180, 200),
-            halign="center",
-        )
+        from client.ui.sky_background import generate_login_cloud_layout, login_ui_forbidden_rects
+
+        vw, vh = int(VIRTUAL_W), int(VIRTUAL_H)
+        forbidden = login_ui_forbidden_rects(vw, vh)
+        cloud_layout = generate_login_cloud_layout(vw, vh, forbidden)
+        root = PcLayout(sky_bg=True, cloud_layout=cloud_layout)
+        title = WallFramedTitle()
         self.username_input = TextInput(
             text=_random_username(),
-            hint_text="输入用户名...",
+            hint_text="Enter username...",
             multiline=False,
             font_size="22sp",
             foreground_color=(1, 1, 1, 1),
@@ -157,7 +168,7 @@ class LoginScreen(Screen):
             padding=[10, 10, 10, 10],
             **text_font_kwargs(),
         )
-        self.btn_enter = _pc_button("进入大厅", font_size=22)
+        self.btn_enter = _pc_button("Enter", font_size=22)
         self.btn_enter.bind(on_press=lambda *_: self._attempt_login())
         self.status = _pc_label(
             text="",
@@ -166,11 +177,10 @@ class LoginScreen(Screen):
             halign="center",
         )
 
-        root.add_pc_widget(title, _pc_rect(126, 118, 600, 48))
-        root.add_pc_widget(subtitle, _pc_rect(126, 176, 600, 28))
-        root.add_pc_widget(self.username_input, _pc_rect(266, 220, 320, 48))
-        root.add_pc_widget(self.btn_enter, _pc_rect(346, 300, 160, 48))
-        root.add_pc_widget(self.status, _pc_rect(80, 360, 692, 82))
+        root.add_pc_widget(title, _pc_rect(114, 112, 624, 128))
+        root.add_pc_widget(self.username_input, _pc_rect(266, 296, 320, 48))
+        root.add_pc_widget(self.btn_enter, _pc_rect(366, 376, 120, 48))
+        root.add_pc_widget(self.status, _pc_rect(80, 436, 692, 82))
         self.add_widget(root)
 
     def on_enter(self):

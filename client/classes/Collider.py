@@ -17,6 +17,7 @@ class Collider:
         except Exception:
             return
         base_index = self.entity.getPosIndex()
+        wall_side = 0
         for row in rows:
             tiles = row[base_index.x : base_index.x + 2]
             for tile in tiles:
@@ -25,9 +26,15 @@ class Collider:
                         if self.entity.vel.x > 0:
                             self.entity.rect.right = tile.rect.left
                             self.entity.vel.x = 0
-                        if self.entity.vel.x < 0:
+                            wall_side = 1
+                        elif self.entity.vel.x < 0:
                             self.entity.rect.left = tile.rect.right
                             self.entity.vel.x = 0
+                            wall_side = -1
+        if wall_side:
+            trait = getattr(self.entity, "leftrightTrait", None)
+            if trait is not None:
+                trait.on_wall_collision(wall_side)
 
     def checkY(self):
         self.entity.onGround = False
@@ -76,10 +83,16 @@ class Collider:
         if self.entity.getPosIndexAsFloat().x > self.levelObj.levelLength - 1:
             self.entity.rect.x = (self.levelObj.levelLength - 1) * 32
             self.entity.vel.x = 0
+            trait = getattr(self.entity, "leftrightTrait", None)
+            if trait is not None:
+                trait.on_wall_collision(1)
             return True
 
     def leftLevelBorderReached(self):
         if self.entity.rect.x < 0:
             self.entity.rect.x = 0
             self.entity.vel.x = 0
+            trait = getattr(self.entity, "leftrightTrait", None)
+            if trait is not None:
+                trait.on_wall_collision(-1)
             return True

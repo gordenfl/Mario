@@ -174,7 +174,7 @@ class SkyMushroomEntity(_LandedDropBase):
             self.was_on_ground = False
 
         prev_x = self.pos_x
-        if not self.waiting_direction:
+        if self.direction != 0:
             self.pos_x += MUSHROOM_SPEED * float(self.direction)
         self.rect.x = int(self.pos_x)
 
@@ -187,11 +187,16 @@ class SkyMushroomEntity(_LandedDropBase):
             elif left_block or right_block:
                 self.pos_x = prev_x
                 self.rect.x = int(self.pos_x)
-                if not self.waiting_direction:
-                    self.pending_collision = "left" if left_block else "right"
-                    self.waiting_direction = True
-                    if self.direction_callback and self.drop_id:
-                        self.direction_callback(self.drop_id, self.pending_collision)
+                if left_block:
+                    self.direction = 1
+                else:
+                    self.direction = -1
+                self.landing_cooldown = max(self.landing_cooldown, 1)
+                side = "left" if left_block else "right"
+                if self.direction_callback and self.drop_id:
+                    if self.pending_collision != side:
+                        self.pending_collision = side
+                        self.direction_callback(self.drop_id, side)
                 self.just_landed = False
         elif self.just_landed:
             self.just_landed = False

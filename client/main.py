@@ -10,6 +10,7 @@ from classes.Dashboard import Dashboard
 from classes.Level import Level
 from classes.Menu import Menu
 from classes.Sound import Sound
+from classes.Sprites import Sprites
 from entities.Mario import Mario
 from entities.fireball import Fireball
 from entities.sky_drop import SkyDrop, SkyMushroom
@@ -24,6 +25,14 @@ from network.protocol import (
     PROJECTILE_FLAG_UPDATE,
     PROJECTILE_FLAG_DESPAWN,
     ACTION_FIRE,
+)
+from ui.sky_background import LoginDriftingClouds, draw_login_sky
+from ui.login_frame_mushrooms import LoginFrameMushrooms
+from ui.login_wall_mario import LoginWallMario
+from ui.wall_title import (
+    build_title_letter_colors,
+    draw_login_title_text,
+    draw_wall_frame_bricks,
 )
 from ui.widgets import Button, TextInput, get_font
 from viewport import compute_virtual_framebuffer, default_window_size
@@ -138,21 +147,33 @@ def _random_username() -> str:
 class LoginScene(Scene):
     def __init__(self, screen, network: NetworkClient):
         super().__init__(screen, network)
-        self.font_title = get_font(48)
+        self._sprites = Sprites()
+        self._drifting_clouds = LoginDriftingClouds(
+            windowSize[0], windowSize[1]
+        )
+        title_center = (windowSize[0] // 2, 160)
+        self._title_center = title_center
+        self._title_colors = build_title_letter_colors(self._sprites.spriteCollection)
+        self._wall_mario = LoginWallMario(
+            self._sprites.spriteCollection, title_center
+        )
+        self._frame_mushrooms = LoginFrameMushrooms(
+            self._sprites.spriteCollection, title_center
+        )
         self.font_body = get_font(28)
         self.message = ""
         input_width = 320
         input_height = 48
         center_x = windowSize[0] // 2
         self.input_username = TextInput(
-            rect=(center_x - input_width // 2, 220, input_width, input_height),
-            placeholder="输入用户名...",
+            rect=(center_x - input_width // 2, 296, input_width, input_height),
+            placeholder="Enter username...",
             max_length=16,
         )
         self.input_username.text = _random_username()
         self.button_login = Button(
-            rect=(center_x - 80, 300, 160, 48),
-            text="进入大厅",
+            rect=(center_x - 60, 376, 120, 48),
+            text="Enter",
             callback=self.attempt_login,
         )
         self.in_progress = False
@@ -181,21 +202,32 @@ class LoginScene(Scene):
             self.button_login.handle_event(event)
 
     def update(self, dt_ms):
+        self._drifting_clouds.update(dt_ms)
+        self._wall_mario.update(dt_ms)
+        self._frame_mushrooms.update(dt_ms)
         self.input_username.update(dt_ms)
         self.button_login.update(pygame.mouse.get_pos())
 
     def draw(self):
-        self.screen.fill((24, 24, 32))
-        title = self.font_title.render("超级马里奥 - 联机版", True, (255, 255, 255))
-        subtitle = self.font_body.render("请输入用户名登录游戏", True, (180, 180, 200))
-        self.screen.blit(title, title.get_rect(center=(windowSize[0] // 2, 140)))
-        self.screen.blit(subtitle, subtitle.get_rect(center=(windowSize[0] // 2, 190)))
+        draw_login_sky(
+            self.screen,
+            self._sprites.spriteCollection,
+            drifting_clouds=self._drifting_clouds,
+        )
+        draw_wall_frame_bricks(
+            self.screen, self._sprites.spriteCollection, self._title_center
+        )
+        self._frame_mushrooms.draw(self.screen)
+        draw_login_title_text(
+            self.screen, self._title_center, self._title_colors
+        )
+        self._wall_mario.draw(self.screen)
         self.input_username.draw(self.screen)
         self.button_login.draw(self.screen)
         if self.message:
             message_surf = self.font_body.render(self.message, True, (220, 220, 100))
             self.screen.blit(
-                message_surf, message_surf.get_rect(center=(windowSize[0] // 2, 370))
+                message_surf, message_surf.get_rect(center=(windowSize[0] // 2, 446))
             )
 
 

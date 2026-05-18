@@ -1,24 +1,10 @@
-import os
-from functools import lru_cache
-
 import pygame
 
-
-def _font_path():
-    base = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(base, "..", "fonts", "Regular.ttf")
-    return os.path.normpath(path)
+from ui.fonts import get_ui_font
 
 
-@lru_cache(maxsize=32)
-def get_font(size: int):
-    path = _font_path()
-    if os.path.exists(path):
-        try:
-            return pygame.font.Font(path, size)
-        except Exception:
-            pass
-    return pygame.font.Font(None, size)
+def get_font(size: int, *, bold: bool = False):
+    return get_ui_font(size, bold=bold)
 
 
 class Button:
@@ -29,7 +15,7 @@ class Button:
         self.base_color = base_color
         self.hover_color = hover_color
         self.text_color = text_color
-        self.font = font or get_font(28)
+        self.font = font or get_font(24, bold=True)
         self.hovered = False
         self.disabled = False
 
@@ -70,7 +56,7 @@ class Label:
 class TextInput:
     def __init__(self, rect, font=None, placeholder="", max_length=20, text_color=(255, 255, 255), bg_color=(30, 30, 30), border_color=(80, 80, 80)):
         self.rect = pygame.Rect(rect)
-        self.font = font or get_font(28)
+        self.font = font or get_font(26)
         self.placeholder = placeholder
         self.text = ""
         self.max_length = max_length
@@ -80,7 +66,7 @@ class TextInput:
         self.active = False
         self.cursor_visible = True
         self._cursor_timer = 0
-        self._cursor_interval = 400  # milliseconds
+        self._cursor_interval = 400
 
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:

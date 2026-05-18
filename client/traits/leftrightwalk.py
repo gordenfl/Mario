@@ -11,9 +11,14 @@ class LeftRightWalkTrait:
         self.speed = 1
         self.entity.vel.x = self.speed * self.direction
 
+    def on_wall_collision(self, side: int) -> None:
+        """Turn around after hitting a wall. side: 1 = blocked moving right, -1 = blocked moving left."""
+        if side > 0:
+            self.direction = -1
+        else:
+            self.direction = 1
+
     def update(self):
-        if self.entity.vel.x == 0:
-            self.direction *= -1
         self.entity.vel.x = self.speed * self.direction
         self.moveEntity()
 
